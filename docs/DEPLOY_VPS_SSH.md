@@ -83,3 +83,4 @@ curl -s -X POST http://TU_IP_VPS:4000/auth/login \
 - Este proyecto es un stack aparte del resto.
 - No reemplaza tu stack actual de Dockge.
 - Si quieres, luego puedes administrarlo tambien desde Dockge importando este compose.
+- Para automatizar despliegues por push, revisa `docs/CI_CD_DEPLOY.md`.
