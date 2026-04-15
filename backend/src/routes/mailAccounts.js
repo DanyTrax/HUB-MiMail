@@ -182,4 +182,24 @@ router.delete(
   }
 );
 
+router.delete(
+  "/:id/permanent",
+  requireRole(["superadmin", "company_admin", "operator"]),
+  async (req, res) => {
+    const accountId = safeTextOrNull(req.params.id, 36);
+    if (!accountId) return res.status(400).json({ error: "id invalido" });
+
+    const query = `
+      DELETE FROM mail_accounts
+      WHERE id = $1
+        AND company_id = $2
+      RETURNING id
+    `;
+    const { rows } = await db.query(query, [accountId, req.user.companyId]);
+    if (!rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
+
+    return res.status(204).send();
+  }
+);
+
 module.exports = router;

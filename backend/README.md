@@ -32,6 +32,8 @@ Servidor Express con JWT y RBAC basico:
 - `GET /health`
 - `POST /auth/login`
 - `GET /auth/me` (Bearer token)
+- `POST /auth/microsoft/connect-url` (inicia OAuth2 visual para cuenta Microsoft)
+- `GET /auth/microsoft/callback` (callback OAuth2 de Microsoft)
 - `GET /protected/health-auth` (Bearer token)
 - `GET /protected/scheduler` (roles: `superadmin`, `company_admin`, `scheduler`)
 - `GET /protected/operator` (roles: `superadmin`, `company_admin`, `operator`)
@@ -39,11 +41,16 @@ Servidor Express con JWT y RBAC basico:
 - `POST /mail-accounts` (roles: `superadmin`, `company_admin`, `operator`)
 - `PATCH /mail-accounts/:id` (roles: `superadmin`, `company_admin`, `operator`)
 - `DELETE /mail-accounts/:id` (desactivacion logica)
+- `DELETE /mail-accounts/:id/permanent` (eliminacion definitiva)
 - `GET /users` (roles: `superadmin`, `company_admin`)
 - `POST /users` (crear/asignar usuario en empresa)
 - `PATCH /users/:id/role` (cambiar rol en empresa)
 - `POST /jobs/run` (lanzar imapsync desde plataforma)
 - `GET /jobs/runs` (historial de ejecuciones)
+
+Notas de OAuth Microsoft:
+- Si la cuenta Microsoft ya fue conectada por OAuth2, `POST /jobs/run` puede ejecutarse sin enviar `sourceToken`.
+- El backend usa el token guardado y renueva `access_token` automaticamente con `refresh_token` cuando expira.
 
 Usuario demo de desarrollo (seed):
 - email: `admin@hub.local`

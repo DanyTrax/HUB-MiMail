@@ -4,13 +4,125 @@ const path = require("path");
 const fs = require("fs/promises");
 const { spawn } = require("child_process");
 const db = require("../db");
+const { microsoftOAuth } = require("../config");
 const { requireAuth } = require("../middleware/auth");
 const { requireRole } = require("../middleware/rbac");
 const { safeTextOrNull } = require("../utils/input");
 
 const router = express.Router();
+const MICROSOFT_SCOPE = "offline_access https://outlook.office.com/IMAP.AccessAsUser.All";
 
 router.use(requireAuth);
+
+function parseCredentialSecret(rawValue) {
+  if (!rawValue) return null;
+  try {
+    const parsed = JSON.parse(rawValue);
+    return typeof parsed === "object" && parsed !== null ? parsed : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function isTokenExpired(credentialData) {
+  const createdAtMs = Date.parse(credentialData?.createdAt || "");
+  const expiresIn = Number(credentialData?.expiresIn || 0);
+  if (!createdAtMs || !Number.isFinite(expiresIn) || expiresIn <= 0) return true;
+  // Margen de seguridad para no correr con token casi vencido.
+  const expiresAt = createdAtMs + expiresIn * 1000;
+  return Date.now() >= expiresAt - 2 * 60 * 1000;
+}
+
+async function refreshMicrosoftAccessToken({ companyId, accountId, credentialRow }) {
+  if (!microsoftOAuth.clientId) {
+    throw new Error("Microsoft OAuth2 no esta configurado en backend (MS_CLIENT_ID)");
+  }
+
+  const credentialData = parseCredentialSecret(credentialRow.secret_ciphertext);
+  if (!credentialData?.refreshToken) {
+    throw new Error("La cuenta Microsoft no tiene refresh token guardado");
+  }
+
+  const tokenUrl = new URL(
+    `https://login.microsoftonline.com/${encodeURIComponent(microsoftOAuth.tenantId)}/oauth2/v2.0/token`
+  );
+  const payload = new URLSearchParams();
+  payload.set("client_id", microsoftOAuth.clientId);
+  payload.set("grant_type", "refresh_token");
+  payload.set("refresh_token", credentialData.refreshToken);
+  payload.set("scope", MICROSOFT_SCOPE);
+  if (microsoftOAuth.clientSecret) payload.set("client_secret", microsoftOAuth.clientSecret);
+
+  const tokenResponse = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: payload.toString()
+  });
+  const tokenData = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok || !tokenData?.access_token) {
+    const detail = tokenData?.error_description || tokenData?.error || "No se obtuvo access_token";
+    throw new Error(`No se pudo renovar token Microsoft: ${detail}`);
+  }
+
+  const updatedSecret = JSON.stringify({
+    ...credentialData,
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token || credentialData.refreshToken,
+    tokenType: tokenData.token_type || "Bearer",
+    expiresIn: tokenData.expires_in || null,
+    scope: tokenData.scope || MICROSOFT_SCOPE,
+    createdAt: new Date().toISOString()
+  });
+
+  await db.query(
+    `UPDATE credentials
+     SET secret_ciphertext = $4,
+         is_active = TRUE,
+         updated_at = NOW()
+     WHERE company_id = $1
+       AND mail_account_id = $2
+       AND id = $3`,
+    [companyId, accountId, credentialRow.id, updatedSecret]
+  );
+
+  return tokenData.access_token;
+}
+
+async function resolveSourceTokenForAccount({ companyId, account, providedSourceToken }) {
+  if (account.provider !== "microsoft") return providedSourceToken || null;
+  if (providedSourceToken) return providedSourceToken;
+
+  const credentialResult = await db.query(
+    `SELECT id, secret_ciphertext
+     FROM credentials
+     WHERE company_id = $1
+       AND mail_account_id = $2
+       AND provider = 'microsoft'::provider_type
+       AND is_active = TRUE
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [companyId, account.id]
+  );
+  if (!credentialResult.rows.length) {
+    throw new Error("La cuenta Microsoft no esta conectada por OAuth2");
+  }
+
+  const credentialRow = credentialResult.rows[0];
+  const credentialData = parseCredentialSecret(credentialRow.secret_ciphertext);
+  if (!credentialData) {
+    throw new Error("Credencial Microsoft invalida o corrupta");
+  }
+
+  if (credentialData.accessToken && !isTokenExpired(credentialData)) {
+    return credentialData.accessToken;
+  }
+
+  return refreshMicrosoftAccessToken({
+    companyId,
+    accountId: account.id,
+    credentialRow
+  });
+}
 
 async function runImapsync({ account, sourceToken, sourcePassword, destinationPassword, dryRun, runId }) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "hub-mimail-"));
@@ -115,16 +227,13 @@ async function runImapsync({ account, sourceToken, sourcePassword, destinationPa
 
 router.post("/run", requireRole(["superadmin", "company_admin", "operator"]), async (req, res) => {
   const mailAccountId = safeTextOrNull(req.body?.mailAccountId, 36);
-  const sourceToken = safeTextOrNull(req.body?.sourceToken, 10000);
+  const sourceTokenInput = safeTextOrNull(req.body?.sourceToken, 10000);
   const sourcePassword = safeTextOrNull(req.body?.sourcePassword, 256);
   const destinationPassword = safeTextOrNull(req.body?.destinationPassword, 256);
   const dryRun = Boolean(req.body?.dryRun);
 
   if (!mailAccountId || !destinationPassword) {
     return res.status(400).json({ error: "mailAccountId y destinationPassword son requeridos" });
-  }
-  if (!sourceToken && !sourcePassword) {
-    return res.status(400).json({ error: "Debes enviar sourceToken o sourcePassword" });
   }
 
   const accountResult = await db.query(
@@ -147,6 +256,20 @@ router.post("/run", requireRole(["superadmin", "company_admin", "operator"]), as
   const account = accountResult.rows[0];
   if (!account.isActive) {
     return res.status(400).json({ error: "La cuenta esta inactiva" });
+  }
+  if (account.provider !== "microsoft" && !sourceTokenInput && !sourcePassword) {
+    return res.status(400).json({ error: "Debes enviar sourceToken o sourcePassword" });
+  }
+
+  let sourceToken = sourceTokenInput;
+  try {
+    sourceToken = await resolveSourceTokenForAccount({
+      companyId: req.user.companyId,
+      account,
+      providedSourceToken: sourceTokenInput
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "No se pudo resolver token OAuth2 de Microsoft" });
   }
 
   const jobResult = await db.query(

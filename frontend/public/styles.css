@@ -69,6 +69,10 @@ button.secondary {
   background: #334155;
 }
 
+button.danger {
+  background: #b91c1c;
+}
+
 .row {
   display: flex;
   gap: 10px;

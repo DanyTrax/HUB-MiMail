@@ -3,6 +3,7 @@
     token: sessionStorage.getItem("token") || "",
     user: null,
     apiBase: sessionStorage.getItem("apiBase") || `${window.location.protocol}//${window.location.hostname}:4000`,
+    oauthTokensByAccount: JSON.parse(sessionStorage.getItem("oauthTokensByAccount") || "{}"),
     accounts: [],
     users: [],
     runs: []
@@ -39,6 +40,14 @@
     el.message.style.color = isError ? "#fca5a5" : "#fcd34d";
   }
 
+  function parseOrigin(urlValue) {
+    try {
+      return new URL(urlValue).origin;
+    } catch (_err) {
+      return "";
+    }
+  }
+
   function setAuth(token, user) {
     state.token = token;
     state.user = user;
@@ -49,6 +58,14 @@
     state.token = "";
     state.user = null;
     sessionStorage.removeItem("token");
+    state.oauthTokensByAccount = {};
+    sessionStorage.removeItem("oauthTokensByAccount");
+  }
+
+  function saveOauthToken(accountId, token) {
+    if (!accountId || !token) return;
+    state.oauthTokensByAccount[accountId] = token;
+    sessionStorage.setItem("oauthTokensByAccount", JSON.stringify(state.oauthTokensByAccount));
   }
 
   async function api(path, options = {}) {
@@ -106,6 +123,33 @@
       const actions = document.createElement("div");
       actions.className = "row";
 
+      if (item.provider === "microsoft") {
+        const connectBtn = document.createElement("button");
+        connectBtn.className = "secondary";
+        connectBtn.textContent = state.oauthTokensByAccount[item.id] ? "Actualizar OAuth2" : "Conectar OAuth2";
+        connectBtn.addEventListener("click", async () => {
+          try {
+            const result = await api("/auth/microsoft/connect-url", {
+              method: "POST",
+              body: { mailAccountId: item.id }
+            });
+            const popup = window.open(
+              result.authorizeUrl,
+              "microsoft-oauth",
+              "popup=yes,width=560,height=720"
+            );
+            if (!popup) {
+              setMessage("Tu navegador bloqueó la ventana OAuth2. Habilita popups e intenta de nuevo.", true);
+              return;
+            }
+            setMessage("Sigue el login en la ventana emergente de Microsoft.");
+          } catch (err) {
+            setMessage(err.message, true);
+          }
+        });
+        actions.appendChild(connectBtn);
+      }
+
       const testBtn = document.createElement("button");
       testBtn.className = "secondary";
       testBtn.textContent = "Probar login";
@@ -135,6 +179,26 @@
         }
       });
       actions.appendChild(disableBtn);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "danger";
+      deleteBtn.textContent = "Eliminar";
+      deleteBtn.addEventListener("click", async () => {
+        const confirmDelete = window.confirm(
+          `Eliminar definitivamente la cuenta ${item.sourceEmail}? Esta accion no se puede deshacer.`
+        );
+        if (!confirmDelete) return;
+        try {
+          await api(`/mail-accounts/${item.id}/permanent`, { method: "DELETE" });
+          delete state.oauthTokensByAccount[item.id];
+          sessionStorage.setItem("oauthTokensByAccount", JSON.stringify(state.oauthTokensByAccount));
+          setMessage("Cuenta eliminada.");
+          await loadAccounts();
+        } catch (err) {
+          setMessage(err.message, true);
+        }
+      });
+      actions.appendChild(deleteBtn);
 
       card.appendChild(actions);
       el.accountsList.appendChild(card);
@@ -233,7 +297,8 @@
 
   async function runMigration(account, dryRun) {
     const isMicrosoft = account.provider === "microsoft";
-    const sourceToken = isMicrosoft ? normalize(window.prompt("Pega token OAuth2 de origen"), 10000) : "";
+    const storedToken = isMicrosoft ? normalize(state.oauthTokensByAccount[account.id] || "", 10000) : "";
+    const sourceToken = isMicrosoft ? storedToken || normalize(window.prompt("Pega token OAuth2 de origen"), 10000) : "";
     const sourcePassword = !isMicrosoft ? normalize(window.prompt("Contraseña IMAP origen"), 256) : "";
     const destinationPassword = normalize(window.prompt("Contraseña IMAP destino"), 256);
 
@@ -398,6 +463,21 @@
       }
     });
   }
+
+  window.addEventListener("message", (event) => {
+    const apiOrigin = parseOrigin(state.apiBase);
+    if (!apiOrigin || event.origin !== apiOrigin) return;
+    const data = event.data || {};
+    if (data.type === "microsoft-oauth-success" && data.accountId && data.accessToken) {
+      saveOauthToken(data.accountId, normalize(data.accessToken, 10000));
+      setMessage("Cuenta Microsoft conectada. Token OAuth2 listo para migracion.");
+      renderAccounts();
+      return;
+    }
+    if (data.type === "microsoft-oauth-error") {
+      setMessage(data.message || "No se pudo completar OAuth2 de Microsoft.", true);
+    }
+  });
 
   el.logoutBtn.addEventListener("click", () => {
     clearAuth();
