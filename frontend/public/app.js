@@ -4,6 +4,7 @@
     user: null,
     apiBase: sessionStorage.getItem("apiBase") || `${window.location.protocol}//${window.location.hostname}:4000`,
     oauthTokensByAccount: JSON.parse(sessionStorage.getItem("oauthTokensByAccount") || "{}"),
+    microsoftConfig: null,
     accounts: [],
     users: [],
     runs: []
@@ -18,13 +19,16 @@
     refreshBtn: document.getElementById("refreshBtn"),
     refreshRunsBtn: document.getElementById("refreshRunsBtn"),
     refreshUsersBtn: document.getElementById("refreshUsersBtn"),
+    refreshOauthBtn: document.getElementById("refreshOauthBtn"),
     message: document.getElementById("message"),
     sessionInfo: document.getElementById("sessionInfo"),
     accountsList: document.getElementById("accountsList"),
     accountsCount: document.getElementById("accountsCount"),
     apiBase: document.getElementById("apiBase"),
     usersSection: document.getElementById("usersSection"),
+    oauthSection: document.getElementById("oauthSection"),
     userForm: document.getElementById("userForm"),
+    oauthForm: document.getElementById("oauthForm"),
     usersList: document.getElementById("usersList"),
     usersCount: document.getElementById("usersCount"),
     runsList: document.getElementById("runsList")
@@ -131,7 +135,7 @@
           try {
             const result = await api("/auth/microsoft/connect-url", {
               method: "POST",
-              body: { mailAccountId: item.id }
+              body: { mailAccountId: item.id, frontendOrigin: window.location.origin }
             });
             const popup = window.open(
               result.authorizeUrl,
@@ -295,6 +299,23 @@
     renderRuns();
   }
 
+  function fillMicrosoftConfigForm(config) {
+    if (!el.oauthForm) return;
+    document.getElementById("msClientId").value = config?.clientId || "";
+    document.getElementById("msClientSecret").value = "";
+    document.getElementById("msTenantId").value = config?.tenantId || "common";
+    document.getElementById("msRedirectUri").value = config?.redirectUri || `${state.apiBase}/auth/microsoft/callback`;
+    document.getElementById("msFrontendOrigin").value = config?.frontendOrigin || window.location.origin;
+    document.getElementById("msIsActive").value = config?.isActive === false ? "false" : "true";
+  }
+
+  async function loadMicrosoftConfig() {
+    if (!state.user || !["superadmin", "company_admin"].includes(state.user.role) || !el.oauthForm) return;
+    const result = await api("/oauth-configs/microsoft");
+    state.microsoftConfig = result?.item || null;
+    fillMicrosoftConfigForm(state.microsoftConfig);
+  }
+
   async function runMigration(account, dryRun) {
     const isMicrosoft = account.provider === "microsoft";
     const storedToken = isMicrosoft ? normalize(state.oauthTokensByAccount[account.id] || "", 10000) : "";
@@ -304,10 +325,6 @@
 
     if (!destinationPassword) {
       setMessage("La contraseña de destino es requerida.", true);
-      return;
-    }
-    if (isMicrosoft && !sourceToken) {
-      setMessage("El token OAuth2 es requerido para Microsoft.", true);
       return;
     }
     if (!isMicrosoft && !sourcePassword) {
@@ -345,9 +362,13 @@
         "hidden",
         !["superadmin", "company_admin"].includes(state.user.role)
       );
+      if (el.oauthSection) {
+        el.oauthSection.classList.toggle("hidden", !["superadmin", "company_admin"].includes(state.user.role));
+      }
       renderSession();
       await loadAccounts();
       await loadUsers();
+      await loadMicrosoftConfig();
       await loadRuns();
     } catch (_err) {
       clearAuth();
@@ -381,8 +402,12 @@
         "hidden",
         !["superadmin", "company_admin"].includes(result.user.role)
       );
+      if (el.oauthSection) {
+        el.oauthSection.classList.toggle("hidden", !["superadmin", "company_admin"].includes(result.user.role));
+      }
       await loadAccounts();
       await loadUsers();
+      await loadMicrosoftConfig();
       await loadRuns();
       setMessage("Sesión iniciada correctamente.");
     } catch (err) {
@@ -443,6 +468,17 @@
     });
   }
 
+  if (el.refreshOauthBtn) {
+    el.refreshOauthBtn.addEventListener("click", async () => {
+      try {
+        await loadMicrosoftConfig();
+        setMessage("Configuracion Microsoft actualizada.");
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
+
   if (el.userForm) {
     el.userForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -458,6 +494,28 @@
         setMessage("Usuario creado/actualizado.");
         el.userForm.reset();
         await loadUsers();
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
+
+  if (el.oauthForm) {
+    el.oauthForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setMessage("");
+      const body = {
+        clientId: normalize(document.getElementById("msClientId").value, 190),
+        clientSecret: normalize(document.getElementById("msClientSecret").value, 2000),
+        tenantId: normalize(document.getElementById("msTenantId").value, 190) || "common",
+        redirectUri: normalize(document.getElementById("msRedirectUri").value, 300),
+        frontendOrigin: normalize(document.getElementById("msFrontendOrigin").value, 300),
+        isActive: document.getElementById("msIsActive").value === "true"
+      };
+      try {
+        await api("/oauth-configs/microsoft", { method: "PUT", body });
+        setMessage("Configuracion Microsoft guardada para esta empresa.");
+        await loadMicrosoftConfig();
       } catch (err) {
         setMessage(err.message, true);
       }
@@ -487,6 +545,7 @@
     el.accountsList.replaceChildren();
     if (el.usersList) el.usersList.replaceChildren();
     if (el.runsList) el.runsList.replaceChildren();
+    if (el.oauthSection) el.oauthSection.classList.add("hidden");
     setMessage("Sesión cerrada.");
   });
 

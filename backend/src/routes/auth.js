@@ -3,9 +3,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const db = require("../db");
-const { jwtSecret, frontendOrigin, microsoftOAuth } = require("../config");
+const { jwtSecret, microsoftOAuth } = require("../config");
 const { requireAuth } = require("../middleware/auth");
-const { normalizeEmailOrNull, normalizeSlugOrNull, safeTextOrNull } = require("../utils/input");
+const { normalizeEmailOrNull, normalizeSlugOrNull, safeTextOrNull, normalizeUrlOrNull } = require("../utils/input");
 
 const router = express.Router();
 const pendingMicrosoftAuth = new Map();
@@ -15,9 +15,10 @@ function toBase64Url(value) {
   return value.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
-function createMicrosoftPopupResponse({ ok, message, payload }) {
+function createMicrosoftPopupResponse({ ok, message, payload, targetOrigin }) {
   const escapedMessage = JSON.stringify(message || "");
   const serializedPayload = JSON.stringify(payload || {});
+  const safeTargetOrigin = JSON.stringify(targetOrigin || "*");
   const type = ok ? "microsoft-oauth-success" : "microsoft-oauth-error";
   return `<!doctype html>
 <html lang="es">
@@ -30,13 +31,32 @@ function createMicrosoftPopupResponse({ ok, message, payload }) {
       payload.type = "${type}";
       payload.message = ${escapedMessage};
       if (window.opener) {
-        window.opener.postMessage(payload, "${frontendOrigin}");
+        window.opener.postMessage(payload, ${safeTargetOrigin});
       }
       window.close();
     })();
   </script>
 </body>
 </html>`;
+}
+
+async function getCompanyMicrosoftConfig(companyId) {
+  const result = await db.query(
+    `SELECT
+      id,
+      client_id AS "clientId",
+      client_secret AS "clientSecret",
+      tenant_id AS "tenantId",
+      redirect_uri AS "redirectUri",
+      frontend_origin AS "frontendOrigin"
+     FROM oauth_provider_configs
+     WHERE company_id = $1
+       AND provider = 'microsoft'::provider_type
+       AND is_active = TRUE
+     LIMIT 1`,
+    [companyId]
+  );
+  return result.rows[0] || null;
 }
 
 router.post("/login", async (req, res) => {
@@ -109,11 +129,8 @@ router.get("/me", requireAuth, async (req, res) => {
 });
 
 router.post("/microsoft/connect-url", requireAuth, async (req, res) => {
-  if (!microsoftOAuth.clientId || !microsoftOAuth.redirectUri) {
-    return res.status(500).json({ error: "Microsoft OAuth2 no esta configurado en el backend" });
-  }
-
   const mailAccountId = safeTextOrNull(req.body?.mailAccountId, 36);
+  const frontendOriginInput = normalizeUrlOrNull(req.body?.frontendOrigin, 300);
   if (!mailAccountId) return res.status(400).json({ error: "mailAccountId invalido" });
 
   const accountResult = await db.query(
@@ -133,6 +150,20 @@ router.post("/microsoft/connect-url", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "La cuenta seleccionada no es del proveedor microsoft" });
   }
 
+  const companyMicrosoftConfig = await getCompanyMicrosoftConfig(req.user.companyId);
+  const resolvedConfig = companyMicrosoftConfig || {
+    clientId: microsoftOAuth.clientId,
+    clientSecret: microsoftOAuth.clientSecret,
+    tenantId: microsoftOAuth.tenantId,
+    redirectUri: microsoftOAuth.redirectUri,
+    frontendOrigin: frontendOriginInput || null
+  };
+  if (!resolvedConfig.clientId || !resolvedConfig.redirectUri) {
+    return res.status(400).json({
+      error: "Microsoft OAuth2 no configurado para esta empresa. Ve a Configuracion Microsoft."
+    });
+  }
+
   const state = toBase64Url(crypto.randomBytes(24));
   const codeVerifier = toBase64Url(crypto.randomBytes(64));
   const codeChallenge = toBase64Url(crypto.createHash("sha256").update(codeVerifier).digest());
@@ -142,15 +173,16 @@ router.post("/microsoft/connect-url", requireAuth, async (req, res) => {
     companyId: req.user.companyId,
     userId: req.user.sub,
     codeVerifier,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    oauthConfig: resolvedConfig
   });
 
   const authorizeUrl = new URL(
-    `https://login.microsoftonline.com/${encodeURIComponent(microsoftOAuth.tenantId)}/oauth2/v2.0/authorize`
+    `https://login.microsoftonline.com/${encodeURIComponent(resolvedConfig.tenantId || "common")}/oauth2/v2.0/authorize`
   );
-  authorizeUrl.searchParams.set("client_id", microsoftOAuth.clientId);
+  authorizeUrl.searchParams.set("client_id", resolvedConfig.clientId);
   authorizeUrl.searchParams.set("response_type", "code");
-  authorizeUrl.searchParams.set("redirect_uri", microsoftOAuth.redirectUri);
+  authorizeUrl.searchParams.set("redirect_uri", resolvedConfig.redirectUri);
   authorizeUrl.searchParams.set("response_mode", "query");
   authorizeUrl.searchParams.set("scope", MICROSOFT_SCOPE);
   authorizeUrl.searchParams.set("state", state);
@@ -174,7 +206,8 @@ router.get("/microsoft/callback", async (req, res) => {
       .send(
         createMicrosoftPopupResponse({
           ok: false,
-          message: `Microsoft devolvio error: ${oauthErrorDescription || oauthError}`
+          message: `Microsoft devolvio error: ${oauthErrorDescription || oauthError}`,
+          targetOrigin: "*"
         })
       );
   }
@@ -183,7 +216,7 @@ router.get("/microsoft/callback", async (req, res) => {
     return res
       .status(400)
       .type("html")
-      .send(createMicrosoftPopupResponse({ ok: false, message: "Faltan parametros OAuth2 (state/code)." }));
+      .send(createMicrosoftPopupResponse({ ok: false, message: "Faltan parametros OAuth2 (state/code).", targetOrigin: "*" }));
   }
 
   const pending = pendingMicrosoftAuth.get(state);
@@ -192,20 +225,22 @@ router.get("/microsoft/callback", async (req, res) => {
     return res
       .status(400)
       .type("html")
-      .send(createMicrosoftPopupResponse({ ok: false, message: "Sesion OAuth2 expirada. Reintenta conectar." }));
+      .send(createMicrosoftPopupResponse({ ok: false, message: "Sesion OAuth2 expirada. Reintenta conectar.", targetOrigin: "*" }));
   }
 
+  const oauthConfig = pending.oauthConfig || {};
+
   const tokenUrl = new URL(
-    `https://login.microsoftonline.com/${encodeURIComponent(microsoftOAuth.tenantId)}/oauth2/v2.0/token`
+    `https://login.microsoftonline.com/${encodeURIComponent(oauthConfig.tenantId || "common")}/oauth2/v2.0/token`
   );
   const payload = new URLSearchParams();
-  payload.set("client_id", microsoftOAuth.clientId);
+  payload.set("client_id", oauthConfig.clientId);
   payload.set("grant_type", "authorization_code");
   payload.set("code", code);
-  payload.set("redirect_uri", microsoftOAuth.redirectUri);
+  payload.set("redirect_uri", oauthConfig.redirectUri);
   payload.set("code_verifier", pending.codeVerifier);
   payload.set("scope", MICROSOFT_SCOPE);
-  if (microsoftOAuth.clientSecret) payload.set("client_secret", microsoftOAuth.clientSecret);
+  if (oauthConfig.clientSecret) payload.set("client_secret", oauthConfig.clientSecret);
 
   let tokenData;
   try {
@@ -220,13 +255,25 @@ router.get("/microsoft/callback", async (req, res) => {
       return res
         .status(400)
         .type("html")
-        .send(createMicrosoftPopupResponse({ ok: false, message: `No se pudo emitir token: ${detail}` }));
+        .send(
+          createMicrosoftPopupResponse({
+            ok: false,
+            message: `No se pudo emitir token: ${detail}`,
+            targetOrigin: oauthConfig.frontendOrigin
+          })
+        );
     }
   } catch (err) {
     return res
       .status(500)
       .type("html")
-      .send(createMicrosoftPopupResponse({ ok: false, message: `Error al consultar token endpoint: ${err.message}` }));
+      .send(
+        createMicrosoftPopupResponse({
+          ok: false,
+          message: `Error al consultar token endpoint: ${err.message}`,
+          targetOrigin: oauthConfig.frontendOrigin
+        })
+      );
   }
 
   const secretCiphertext = JSON.stringify({
@@ -273,6 +320,7 @@ router.get("/microsoft/callback", async (req, res) => {
       createMicrosoftPopupResponse({
         ok: true,
         message: "Cuenta Microsoft conectada correctamente.",
+        targetOrigin: oauthConfig.frontendOrigin,
         payload: {
           accountId: pending.mailAccountId,
           accessToken: tokenData.access_token,

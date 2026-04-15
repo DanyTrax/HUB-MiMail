@@ -42,9 +42,22 @@ function normalizeHostOrNull(value) {
   return isFqdn || isIp ? normalized : null;
 }
 
+function normalizeUrlOrNull(value, maxLen = 300) {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = normalizeText(value, maxLen);
+  if (!normalized) return null;
+  const isValid = validator.isURL(normalized, {
+    protocols: ["http", "https"],
+    require_protocol: true,
+    require_tld: false
+  });
+  return isValid ? normalized : null;
+}
+
 module.exports = {
   safeTextOrNull,
   normalizeEmailOrNull,
   normalizeSlugOrNull,
-  normalizeHostOrNull
+  normalizeHostOrNull,
+  normalizeUrlOrNull
 };

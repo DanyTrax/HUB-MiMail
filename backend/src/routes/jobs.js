@@ -33,8 +33,24 @@ function isTokenExpired(credentialData) {
   return Date.now() >= expiresAt - 2 * 60 * 1000;
 }
 
-async function refreshMicrosoftAccessToken({ companyId, accountId, credentialRow }) {
-  if (!microsoftOAuth.clientId) {
+async function getCompanyMicrosoftConfig(companyId) {
+  const result = await db.query(
+    `SELECT
+      client_id AS "clientId",
+      client_secret AS "clientSecret",
+      tenant_id AS "tenantId"
+     FROM oauth_provider_configs
+     WHERE company_id = $1
+       AND provider = 'microsoft'::provider_type
+       AND is_active = TRUE
+     LIMIT 1`,
+    [companyId]
+  );
+  return result.rows[0] || null;
+}
+
+async function refreshMicrosoftAccessToken({ companyId, accountId, credentialRow, oauthConfig }) {
+  if (!oauthConfig?.clientId) {
     throw new Error("Microsoft OAuth2 no esta configurado en backend (MS_CLIENT_ID)");
   }
 
@@ -44,14 +60,14 @@ async function refreshMicrosoftAccessToken({ companyId, accountId, credentialRow
   }
 
   const tokenUrl = new URL(
-    `https://login.microsoftonline.com/${encodeURIComponent(microsoftOAuth.tenantId)}/oauth2/v2.0/token`
+    `https://login.microsoftonline.com/${encodeURIComponent(oauthConfig.tenantId || "common")}/oauth2/v2.0/token`
   );
   const payload = new URLSearchParams();
-  payload.set("client_id", microsoftOAuth.clientId);
+  payload.set("client_id", oauthConfig.clientId);
   payload.set("grant_type", "refresh_token");
   payload.set("refresh_token", credentialData.refreshToken);
   payload.set("scope", MICROSOFT_SCOPE);
-  if (microsoftOAuth.clientSecret) payload.set("client_secret", microsoftOAuth.clientSecret);
+  if (oauthConfig.clientSecret) payload.set("client_secret", oauthConfig.clientSecret);
 
   const tokenResponse = await fetch(tokenUrl, {
     method: "POST",
@@ -117,10 +133,18 @@ async function resolveSourceTokenForAccount({ companyId, account, providedSource
     return credentialData.accessToken;
   }
 
+  const companyMicrosoftConfig = await getCompanyMicrosoftConfig(companyId);
+  const oauthConfig = companyMicrosoftConfig || {
+    clientId: microsoftOAuth.clientId,
+    clientSecret: microsoftOAuth.clientSecret,
+    tenantId: microsoftOAuth.tenantId
+  };
+
   return refreshMicrosoftAccessToken({
     companyId,
     accountId: account.id,
-    credentialRow
+    credentialRow,
+    oauthConfig
   });
 }
 

@@ -126,6 +126,44 @@
           <p id="usersCount" class="hint"></p>
           <div id="usersList" class="list"></div>
         </div>
+
+        <div id="oauthSection" class="card hidden">
+          <div class="row between">
+            <h2>Configuracion Microsoft (empresa)</h2>
+            <button id="refreshOauthBtn" class="secondary">Actualizar</button>
+          </div>
+          <form id="oauthForm" class="form grid">
+            <label>
+              Client ID
+              <input id="msClientId" type="text" required />
+            </label>
+            <label>
+              Client Secret
+              <input id="msClientSecret" type="password" placeholder="Solo completar para crear/rotar secreto" />
+            </label>
+            <label>
+              Tenant ID
+              <input id="msTenantId" type="text" placeholder="common" required />
+            </label>
+            <label>
+              Redirect URI
+              <input id="msRedirectUri" type="url" required />
+            </label>
+            <label>
+              Frontend Origin
+              <input id="msFrontendOrigin" type="url" required />
+            </label>
+            <label>
+              Estado
+              <select id="msIsActive" required>
+                <option value="true">Activo</option>
+                <option value="false">Inactivo</option>
+              </select>
+            </label>
+            <button type="submit">Guardar configuracion</button>
+          </form>
+          <p class="hint">Esta configuracion es por empresa y se usa en el boton "Conectar OAuth2".</p>
+        </div>
       </section>
 
       <p id="message" class="message" aria-live="polite"></p>

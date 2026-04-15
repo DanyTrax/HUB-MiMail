@@ -45,10 +45,13 @@ Servidor Express con JWT y RBAC basico:
 - `GET /users` (roles: `superadmin`, `company_admin`)
 - `POST /users` (crear/asignar usuario en empresa)
 - `PATCH /users/:id/role` (cambiar rol en empresa)
+- `GET /oauth-configs/microsoft` (ver configuracion Microsoft por empresa)
+- `PUT /oauth-configs/microsoft` (guardar configuracion Microsoft por empresa)
 - `POST /jobs/run` (lanzar imapsync desde plataforma)
 - `GET /jobs/runs` (historial de ejecuciones)
 
 Notas de OAuth Microsoft:
+- La configuracion OAuth (clientId/clientSecret/tenantId/redirectUri/frontendOrigin) se guarda por empresa.
 - Si la cuenta Microsoft ya fue conectada por OAuth2, `POST /jobs/run` puede ejecutarse sin enviar `sourceToken`.
 - El backend usa el token guardado y renueva `access_token` automaticamente con `refresh_token` cuando expira.
 
