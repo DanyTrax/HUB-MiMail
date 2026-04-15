@@ -4,7 +4,8 @@
     user: null,
     apiBase: sessionStorage.getItem("apiBase") || `${window.location.protocol}//${window.location.hostname}:4000`,
     accounts: [],
-    users: []
+    users: [],
+    runs: []
   };
 
   const el = {
@@ -14,6 +15,7 @@
     accountForm: document.getElementById("accountForm"),
     logoutBtn: document.getElementById("logoutBtn"),
     refreshBtn: document.getElementById("refreshBtn"),
+    refreshRunsBtn: document.getElementById("refreshRunsBtn"),
     refreshUsersBtn: document.getElementById("refreshUsersBtn"),
     message: document.getElementById("message"),
     sessionInfo: document.getElementById("sessionInfo"),
@@ -23,7 +25,8 @@
     usersSection: document.getElementById("usersSection"),
     userForm: document.getElementById("userForm"),
     usersList: document.getElementById("usersList"),
-    usersCount: document.getElementById("usersCount")
+    usersCount: document.getElementById("usersCount"),
+    runsList: document.getElementById("runsList")
   };
 
   function normalize(value, max = 255) {
@@ -103,6 +106,21 @@
       const actions = document.createElement("div");
       actions.className = "row";
 
+      const testBtn = document.createElement("button");
+      testBtn.className = "secondary";
+      testBtn.textContent = "Probar login";
+      testBtn.addEventListener("click", async () => {
+        await runMigration(item, true);
+      });
+      actions.appendChild(testBtn);
+
+      const migrateBtn = document.createElement("button");
+      migrateBtn.textContent = "Migrar ahora";
+      migrateBtn.addEventListener("click", async () => {
+        await runMigration(item, false);
+      });
+      actions.appendChild(migrateBtn);
+
       const disableBtn = document.createElement("button");
       disableBtn.className = "secondary";
       disableBtn.textContent = "Desactivar";
@@ -120,6 +138,28 @@
 
       card.appendChild(actions);
       el.accountsList.appendChild(card);
+    }
+  }
+
+  function renderRuns() {
+    el.runsList.replaceChildren();
+    if (!state.runs.length) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "Sin ejecuciones registradas.";
+      el.runsList.appendChild(p);
+      return;
+    }
+    for (const run of state.runs) {
+      const card = document.createElement("article");
+      card.className = "item";
+      const title = document.createElement("h3");
+      title.textContent = `${run.jobName || "Job"} - ${run.status}`;
+      card.appendChild(title);
+      card.appendChild(createTextLine("Inicio", run.startedAt));
+      card.appendChild(createTextLine("Fin", run.finishedAt));
+      card.appendChild(createTextLine("Resumen", run.summary));
+      el.runsList.appendChild(card);
     }
   }
 
@@ -185,6 +225,45 @@
     renderUsers();
   }
 
+  async function loadRuns() {
+    const result = await api("/jobs/runs");
+    state.runs = Array.isArray(result?.items) ? result.items : [];
+    renderRuns();
+  }
+
+  async function runMigration(account, dryRun) {
+    const isMicrosoft = account.provider === "microsoft";
+    const sourceToken = isMicrosoft ? normalize(window.prompt("Pega token OAuth2 de origen"), 10000) : "";
+    const sourcePassword = !isMicrosoft ? normalize(window.prompt("Contraseña IMAP origen"), 256) : "";
+    const destinationPassword = normalize(window.prompt("Contraseña IMAP destino"), 256);
+
+    if (!destinationPassword) {
+      setMessage("La contraseña de destino es requerida.", true);
+      return;
+    }
+    if (isMicrosoft && !sourceToken) {
+      setMessage("El token OAuth2 es requerido para Microsoft.", true);
+      return;
+    }
+    if (!isMicrosoft && !sourcePassword) {
+      setMessage("La contraseña de origen es requerida.", true);
+      return;
+    }
+
+    await api("/jobs/run", {
+      method: "POST",
+      body: {
+        mailAccountId: account.id,
+        sourceToken: sourceToken || null,
+        sourcePassword: sourcePassword || null,
+        destinationPassword,
+        dryRun
+      }
+    });
+    setMessage(dryRun ? "Prueba de login lanzada." : "Migración lanzada.");
+    await loadRuns();
+  }
+
   async function bootstrapSession() {
     if (!state.token) {
       el.loginSection.classList.remove("hidden");
@@ -204,6 +283,7 @@
       renderSession();
       await loadAccounts();
       await loadUsers();
+      await loadRuns();
     } catch (_err) {
       clearAuth();
       el.loginSection.classList.remove("hidden");
@@ -238,6 +318,7 @@
       );
       await loadAccounts();
       await loadUsers();
+      await loadRuns();
       setMessage("Sesión iniciada correctamente.");
     } catch (err) {
       setMessage(err.message, true);
@@ -274,6 +355,17 @@
       setMessage(err.message, true);
     }
   });
+
+  if (el.refreshRunsBtn) {
+    el.refreshRunsBtn.addEventListener("click", async () => {
+      try {
+        await loadRuns();
+        setMessage("Ejecuciones actualizadas.");
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
 
   if (el.refreshUsersBtn) {
     el.refreshUsersBtn.addEventListener("click", async () => {
@@ -314,6 +406,7 @@
     renderSession();
     el.accountsList.replaceChildren();
     if (el.usersList) el.usersList.replaceChildren();
+    if (el.runsList) el.runsList.replaceChildren();
     setMessage("Sesión cerrada.");
   });
 

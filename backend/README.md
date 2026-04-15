@@ -42,6 +42,8 @@ Servidor Express con JWT y RBAC basico:
 - `GET /users` (roles: `superadmin`, `company_admin`)
 - `POST /users` (crear/asignar usuario en empresa)
 - `PATCH /users/:id/role` (cambiar rol en empresa)
+- `POST /jobs/run` (lanzar imapsync desde plataforma)
+- `GET /jobs/runs` (historial de ejecuciones)
 
 Usuario demo de desarrollo (seed):
 - email: `admin@hub.local`
