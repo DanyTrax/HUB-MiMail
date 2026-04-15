@@ -35,8 +35,20 @@ Servidor Express con JWT y RBAC basico:
 - `GET /protected/health-auth` (Bearer token)
 - `GET /protected/scheduler` (roles: `superadmin`, `company_admin`, `scheduler`)
 - `GET /protected/operator` (roles: `superadmin`, `company_admin`, `operator`)
+- `GET /mail-accounts` (autenticado, filtrado por empresa)
+- `POST /mail-accounts` (roles: `superadmin`, `company_admin`, `operator`)
+- `PATCH /mail-accounts/:id` (roles: `superadmin`, `company_admin`, `operator`)
+- `DELETE /mail-accounts/:id` (desactivacion logica)
 
 Usuario demo de desarrollo (seed):
 - email: `admin@hub.local`
 - password: `Admin123*`
 - companySlug: `empresa-demo`
+
+## Seguridad aplicada
+
+- Headers de seguridad con `helmet`.
+- Limitacion de intentos en `/auth` con `express-rate-limit`.
+- Validacion y normalizacion estricta de inputs en login y cuentas.
+- Rechazo de patrones peligrosos (`<script>`, `javascript:`, handlers inline).
+- Consultas SQL parametrizadas (sin interpolacion directa).

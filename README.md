@@ -65,6 +65,7 @@ Para iniciar implementacion paso a paso (arquitectura, seguridad, multiempresa, 
 
 - `docs/CHECKLIST_EJECUTABLE.md`
 - `docs/DEPLOY_VPS_SSH.md`
+- `docs/SECURITY_BASELINE.md`
 
 ## Estructura Inicial Creada
 

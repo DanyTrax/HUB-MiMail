@@ -4,11 +4,14 @@ const jwt = require("jsonwebtoken");
 const db = require("../db");
 const { jwtSecret } = require("../config");
 const { requireAuth } = require("../middleware/auth");
+const { normalizeEmailOrNull, normalizeSlugOrNull, safeTextOrNull } = require("../utils/input");
 
 const router = express.Router();
 
 router.post("/login", async (req, res) => {
-  const { email, password, companySlug } = req.body || {};
+  const email = normalizeEmailOrNull(req.body?.email);
+  const companySlug = normalizeSlugOrNull(req.body?.companySlug);
+  const password = safeTextOrNull(req.body?.password, 256);
 
   if (!email || !password || !companySlug) {
     return res.status(400).json({ error: "email, password y companySlug son requeridos" });
@@ -33,7 +36,7 @@ router.post("/login", async (req, res) => {
     LIMIT 1
   `;
 
-  const { rows } = await db.query(query, [email.toLowerCase().trim(), companySlug.trim()]);
+  const { rows } = await db.query(query, [email, companySlug]);
   if (!rows.length) {
     return res.status(401).json({ error: "Credenciales invalidas o empresa no asignada" });
   }

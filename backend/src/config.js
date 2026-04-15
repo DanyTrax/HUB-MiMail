@@ -14,6 +14,7 @@ for (const key of required) {
 module.exports = {
   port: Number(process.env.API_PORT || 4000),
   jwtSecret: process.env.JWT_SECRET || "change_me",
+  corsOrigin: process.env.CORS_ORIGIN || "*",
   db: {
     host: process.env.DB_HOST || "postgres",
     port: Number(process.env.DB_PORT || 5432),
