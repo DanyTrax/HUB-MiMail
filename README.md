@@ -64,6 +64,7 @@ Crear la estructura base del proyecto:
 Para iniciar implementacion paso a paso (arquitectura, seguridad, multiempresa, scheduler, deploy, backup/restore), usa:
 
 - `docs/CHECKLIST_EJECUTABLE.md`
+- `docs/DEPLOY_VPS_SSH.md`
 
 ## Estructura Inicial Creada
 
