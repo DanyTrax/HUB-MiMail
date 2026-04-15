@@ -1,0 +1,32 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log
+logs/
+tmp/
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+secrets/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+coverage/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Docker
+*.pid
