@@ -5,6 +5,7 @@ const { baseHelmet, authRateLimiter } = require("./middleware/security");
 const authRoutes = require("./routes/auth");
 const protectedRoutes = require("./routes/protected");
 const mailAccountRoutes = require("./routes/mailAccounts");
+const userRoutes = require("./routes/users");
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.get("/health", (req, res) => {
 app.use("/auth", authRateLimiter, authRoutes);
 app.use("/protected", protectedRoutes);
 app.use("/mail-accounts", mailAccountRoutes);
+app.use("/users", userRoutes);
 
 app.use((err, req, res, next) => {
   // eslint-disable-next-line no-console

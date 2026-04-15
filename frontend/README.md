@@ -16,7 +16,8 @@ Frontend inicial funcional implementado con:
 - visualizacion de sesion autenticada,
 - listado de cuentas de correo,
 - creacion de cuenta,
-- desactivacion logica de cuenta.
+- desactivacion logica de cuenta,
+- gestion de usuarios/roles para `superadmin` y `company_admin`.
 
 ## Seguridad aplicada
 

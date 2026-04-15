@@ -3,7 +3,8 @@
     token: sessionStorage.getItem("token") || "",
     user: null,
     apiBase: sessionStorage.getItem("apiBase") || `${window.location.protocol}//${window.location.hostname}:4000`,
-    accounts: []
+    accounts: [],
+    users: []
   };
 
   const el = {
@@ -13,11 +14,16 @@
     accountForm: document.getElementById("accountForm"),
     logoutBtn: document.getElementById("logoutBtn"),
     refreshBtn: document.getElementById("refreshBtn"),
+    refreshUsersBtn: document.getElementById("refreshUsersBtn"),
     message: document.getElementById("message"),
     sessionInfo: document.getElementById("sessionInfo"),
     accountsList: document.getElementById("accountsList"),
     accountsCount: document.getElementById("accountsCount"),
-    apiBase: document.getElementById("apiBase")
+    apiBase: document.getElementById("apiBase"),
+    usersSection: document.getElementById("usersSection"),
+    userForm: document.getElementById("userForm"),
+    usersList: document.getElementById("usersList"),
+    usersCount: document.getElementById("usersCount")
   };
 
   function normalize(value, max = 255) {
@@ -117,10 +123,66 @@
     }
   }
 
+  function renderUsers() {
+    if (!el.usersList) return;
+    el.usersList.replaceChildren();
+    el.usersCount.textContent = `Total usuarios: ${state.users.length}`;
+    for (const user of state.users) {
+      const card = document.createElement("article");
+      card.className = "item";
+
+      const title = document.createElement("h3");
+      title.textContent = `${user.fullName} (${user.email})`;
+      card.appendChild(title);
+      card.appendChild(createTextLine("Rol", user.role));
+      card.appendChild(createTextLine("Activo", String(user.isActive)));
+
+      const roleSelect = document.createElement("select");
+      ["company_admin", "operator", "scheduler", "viewer"].forEach((role) => {
+        const op = document.createElement("option");
+        op.value = role;
+        op.textContent = role;
+        if (user.role === role) op.selected = true;
+        roleSelect.appendChild(op);
+      });
+
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "secondary";
+      saveBtn.textContent = "Cambiar rol";
+      saveBtn.addEventListener("click", async () => {
+        try {
+          await api(`/users/${user.id}/role`, {
+            method: "PATCH",
+            body: { role: normalize(roleSelect.value, 30) }
+          });
+          setMessage("Rol actualizado.");
+          await loadUsers();
+        } catch (err) {
+          setMessage(err.message, true);
+        }
+      });
+
+      const actions = document.createElement("div");
+      actions.className = "row";
+      actions.appendChild(roleSelect);
+      actions.appendChild(saveBtn);
+      card.appendChild(actions);
+
+      el.usersList.appendChild(card);
+    }
+  }
+
   async function loadAccounts() {
     const result = await api("/mail-accounts");
     state.accounts = Array.isArray(result?.items) ? result.items : [];
     renderAccounts();
+  }
+
+  async function loadUsers() {
+    if (!state.user || !["superadmin", "company_admin"].includes(state.user.role)) return;
+    const result = await api("/users");
+    state.users = Array.isArray(result?.items) ? result.items : [];
+    renderUsers();
   }
 
   async function bootstrapSession() {
@@ -135,8 +197,13 @@
       state.user = result.user;
       el.loginSection.classList.add("hidden");
       el.appSection.classList.remove("hidden");
+      el.usersSection.classList.toggle(
+        "hidden",
+        !["superadmin", "company_admin"].includes(state.user.role)
+      );
       renderSession();
       await loadAccounts();
+      await loadUsers();
     } catch (_err) {
       clearAuth();
       el.loginSection.classList.remove("hidden");
@@ -165,7 +232,12 @@
       renderSession();
       el.loginSection.classList.add("hidden");
       el.appSection.classList.remove("hidden");
+      el.usersSection.classList.toggle(
+        "hidden",
+        !["superadmin", "company_admin"].includes(result.user.role)
+      );
       await loadAccounts();
+      await loadUsers();
       setMessage("Sesión iniciada correctamente.");
     } catch (err) {
       setMessage(err.message, true);
@@ -203,12 +275,45 @@
     }
   });
 
+  if (el.refreshUsersBtn) {
+    el.refreshUsersBtn.addEventListener("click", async () => {
+      try {
+        await loadUsers();
+        setMessage("Usuarios actualizados.");
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
+
+  if (el.userForm) {
+    el.userForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setMessage("");
+      const body = {
+        email: normalize(document.getElementById("userEmail").value, 190).toLowerCase(),
+        fullName: normalize(document.getElementById("userFullName").value, 160),
+        password: normalize(document.getElementById("userPassword").value, 256),
+        role: normalize(document.getElementById("userRole").value, 30)
+      };
+      try {
+        await api("/users", { method: "POST", body });
+        setMessage("Usuario creado/actualizado.");
+        el.userForm.reset();
+        await loadUsers();
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
+
   el.logoutBtn.addEventListener("click", () => {
     clearAuth();
     el.appSection.classList.add("hidden");
     el.loginSection.classList.remove("hidden");
     renderSession();
     el.accountsList.replaceChildren();
+    if (el.usersList) el.usersList.replaceChildren();
     setMessage("Sesión cerrada.");
   });
 

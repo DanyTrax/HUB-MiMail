@@ -39,6 +39,9 @@ Servidor Express con JWT y RBAC basico:
 - `POST /mail-accounts` (roles: `superadmin`, `company_admin`, `operator`)
 - `PATCH /mail-accounts/:id` (roles: `superadmin`, `company_admin`, `operator`)
 - `DELETE /mail-accounts/:id` (desactivacion logica)
+- `GET /users` (roles: `superadmin`, `company_admin`)
+- `POST /users` (crear/asignar usuario en empresa)
+- `PATCH /users/:id/role` (cambiar rol en empresa)
 
 Usuario demo de desarrollo (seed):
 - email: `admin@hub.local`

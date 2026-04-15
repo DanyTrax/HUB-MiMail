@@ -84,6 +84,39 @@
           <p id="accountsCount" class="hint"></p>
           <div id="accountsList" class="list"></div>
         </div>
+
+        <div id="usersSection" class="card hidden">
+          <div class="row between">
+            <h2>Usuarios de la empresa</h2>
+            <button id="refreshUsersBtn" class="secondary">Actualizar</button>
+          </div>
+          <form id="userForm" class="form grid">
+            <label>
+              Email
+              <input id="userEmail" type="email" required />
+            </label>
+            <label>
+              Nombre completo
+              <input id="userFullName" type="text" required />
+            </label>
+            <label>
+              Contraseña
+              <input id="userPassword" type="password" required />
+            </label>
+            <label>
+              Rol
+              <select id="userRole" required>
+                <option value="company_admin">company_admin</option>
+                <option value="operator">operator</option>
+                <option value="scheduler">scheduler</option>
+                <option value="viewer">viewer</option>
+              </select>
+            </label>
+            <button type="submit">Crear usuario</button>
+          </form>
+          <p id="usersCount" class="hint"></p>
+          <div id="usersList" class="list"></div>
+        </div>
       </section>
 
       <p id="message" class="message" aria-live="polite"></p>
