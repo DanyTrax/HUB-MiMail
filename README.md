@@ -94,3 +94,13 @@ bash infra/deploy.sh
 bash infra/migrate.sh
 bash infra/seed.sh
 ```
+
+## Prueba rapida de login API
+
+Con el stack arriba y seed aplicado:
+
+```bash
+curl -s -X POST http://TU_IP_VPS:4000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@hub.local","password":"Admin123*","companySlug":"empresa-demo"}'
+```

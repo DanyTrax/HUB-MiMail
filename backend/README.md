@@ -25,3 +25,18 @@ Ejecucion recomendada desde raiz:
 bash infra/migrate.sh
 bash infra/seed.sh
 ```
+
+## API base implementada (Fase 4 inicial)
+
+Servidor Express con JWT y RBAC basico:
+- `GET /health`
+- `POST /auth/login`
+- `GET /auth/me` (Bearer token)
+- `GET /protected/health-auth` (Bearer token)
+- `GET /protected/scheduler` (roles: `superadmin`, `company_admin`, `scheduler`)
+- `GET /protected/operator` (roles: `superadmin`, `company_admin`, `operator`)
+
+Usuario demo de desarrollo (seed):
+- email: `admin@hub.local`
+- password: `Admin123*`
+- companySlug: `empresa-demo`

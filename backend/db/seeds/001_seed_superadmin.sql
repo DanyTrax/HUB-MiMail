@@ -8,10 +8,13 @@ ON CONFLICT (slug) DO NOTHING;
 INSERT INTO users (email, password_hash, full_name)
 VALUES (
   'admin@hub.local',
-  '$2b$12$U6xvmUz1N9v2eX2T.iIKQe9pLBhZOd5Ii6E6fM6V7x0NfT0VSVKBm',
+  crypt('Admin123*', gen_salt('bf')),
   'Super Admin'
 )
-ON CONFLICT (email) DO NOTHING;
+ON CONFLICT (email)
+DO UPDATE SET
+  password_hash = EXCLUDED.password_hash,
+  full_name = EXCLUDED.full_name;
 
 WITH c AS (
   SELECT id FROM companies WHERE slug = 'empresa-demo'

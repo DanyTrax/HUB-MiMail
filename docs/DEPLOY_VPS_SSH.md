@@ -66,6 +66,16 @@ git pull
 bash infra/deploy.sh
 # Si hay cambios de DB:
 bash infra/migrate.sh
+# Si cambian datos demo o permisos iniciales:
+bash infra/seed.sh
+```
+
+## 9) Probar login base de API
+
+```bash
+curl -s -X POST http://TU_IP_VPS:4000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@hub.local","password":"Admin123*","companySlug":"empresa-demo"}'
 ```
 
 ## Notas importantes
