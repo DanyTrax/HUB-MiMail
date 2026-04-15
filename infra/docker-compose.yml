@@ -36,7 +36,7 @@ services:
     container_name: hub_backend
     restart: always
     working_dir: /app
-    command: ["bash", "-lc", "apt-get update && apt-get install -y --no-install-recommends imapsync ca-certificates && rm -rf /var/lib/apt/lists/* && npm install && npm run start"]
+    command: ["bash", "-lc", "apt-get update && apt-get install -y --no-install-recommends imapsync ca-certificates wget && rm -rf /var/lib/apt/lists/* && npm install && npm run start"]
     env_file:
       - ../.env
     environment:
@@ -59,6 +59,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 180s
 
   worker:
     image: node:20-alpine
@@ -107,6 +108,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 120s
 
 volumes:
   postgres_data:
