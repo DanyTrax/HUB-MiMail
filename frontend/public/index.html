@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HUB-MiMail</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>HUB-MiMail</h1>
+        <p class="subtitle">Panel base de autenticación y cuentas de correo</p>
+      </header>
+
+      <section id="loginSection" class="card">
+        <h2>Iniciar sesión</h2>
+        <form id="loginForm" class="form">
+          <label>
+            Email
+            <input id="email" name="email" type="email" required autocomplete="username" />
+          </label>
+          <label>
+            Contraseña
+            <input id="password" name="password" type="password" required autocomplete="current-password" />
+          </label>
+          <label>
+            Empresa (slug)
+            <input id="companySlug" name="companySlug" type="text" required />
+          </label>
+          <label>
+            API base
+            <input id="apiBase" name="apiBase" type="url" />
+          </label>
+          <button type="submit">Entrar</button>
+        </form>
+      </section>
+
+      <section id="appSection" class="hidden">
+        <div class="card">
+          <div class="row between">
+            <h2>Sesión</h2>
+            <button id="logoutBtn" class="secondary">Cerrar sesión</button>
+          </div>
+          <pre id="sessionInfo" class="pre"></pre>
+        </div>
+
+        <div class="card">
+          <h2>Nueva cuenta de correo</h2>
+          <form id="accountForm" class="form grid">
+            <label>
+              Proveedor
+              <select id="provider" required>
+                <option value="microsoft">microsoft</option>
+                <option value="google">google</option>
+                <option value="imap">imap</option>
+              </select>
+            </label>
+            <label>
+              Email origen
+              <input id="sourceEmail" type="email" required />
+            </label>
+            <label>
+              Email destino
+              <input id="destinationEmail" type="email" />
+            </label>
+            <label>
+              Host origen
+              <input id="sourceHost" type="text" placeholder="outlook.office365.com" />
+            </label>
+            <label>
+              Host destino
+              <input id="destinationHost" type="text" placeholder="mail.tudominio.com" />
+            </label>
+            <button type="submit">Guardar cuenta</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="row between">
+            <h2>Cuentas registradas</h2>
+            <button id="refreshBtn" class="secondary">Actualizar</button>
+          </div>
+          <p id="accountsCount" class="hint"></p>
+          <div id="accountsList" class="list"></div>
+        </div>
+      </section>
+
+      <p id="message" class="message" aria-live="polite"></p>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>

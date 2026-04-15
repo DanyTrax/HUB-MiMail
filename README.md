@@ -105,3 +105,9 @@ curl -s -X POST http://TU_IP_VPS:4000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@hub.local","password":"Admin123*","companySlug":"empresa-demo"}'
 ```
+
+## Frontend base
+
+Despues de desplegar:
+- Panel web: `http://TU_IP_VPS:3000`
+- API backend: `http://TU_IP_VPS:4000`
