@@ -74,7 +74,15 @@ async function runImapsync({ account, sourceToken, sourcePassword, destinationPa
         if (stderrBuffer.length > 30000) stderrBuffer = stderrBuffer.slice(-30000);
       });
 
-      proc.on("error", reject);
+      proc.on("error", async (err) => {
+        await db.query(
+          `UPDATE job_runs
+           SET finished_at = NOW(), status = 'failed', summary = 'imapsync no disponible en runtime', details = $2::jsonb
+           WHERE id = $1`,
+          [runId, JSON.stringify({ error: err.message })]
+        );
+        reject(err);
+      });
 
       proc.on("close", async (code) => {
         const status = code === 0 ? "success" : "failed";
