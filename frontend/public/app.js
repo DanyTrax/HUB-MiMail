@@ -238,7 +238,11 @@
         testBtn.title = "Conecta OAuth2 para habilitar esta accion";
       }
       testBtn.addEventListener("click", async () => {
-        await runMigration(item, true);
+        try {
+          await runMigration(item, true);
+        } catch (err) {
+          setMessage(err.message || "No se pudo lanzar la prueba de login.", true);
+        }
       });
       actions.appendChild(testBtn);
 
@@ -249,7 +253,11 @@
         migrateBtn.title = "Conecta OAuth2 para habilitar esta accion";
       }
       migrateBtn.addEventListener("click", async () => {
-        await runMigration(item, false);
+        try {
+          await runMigration(item, false);
+        } catch (err) {
+          setMessage(err.message || "No se pudo lanzar la migracion.", true);
+        }
       });
       actions.appendChild(migrateBtn);
 
@@ -447,18 +455,23 @@
       return;
     }
 
-    await api("/jobs/run", {
-      method: "POST",
-      body: {
-        mailAccountId: account.id,
-        sourceToken: sourceToken || null,
-        sourcePassword: sourcePassword || null,
-        destinationPassword,
-        dryRun
-      }
-    });
-    setMessage(dryRun ? "Prueba de login lanzada." : "Migración lanzada.");
-    await loadRuns();
+    try {
+      await api("/jobs/run", {
+        method: "POST",
+        body: {
+          mailAccountId: account.id,
+          sourceToken: sourceToken || null,
+          sourcePassword: sourcePassword || null,
+          destinationPassword,
+          dryRun
+        }
+      });
+      setMessage(dryRun ? "Prueba de login lanzada." : "Migración lanzada.");
+      await loadRuns();
+    } catch (err) {
+      setMessage(err.message || "No se pudo crear la ejecucion.", true);
+      throw err;
+    }
   }
 
   async function bootstrapSession() {
