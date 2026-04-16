@@ -148,6 +148,29 @@ async function resolveSourceTokenForAccount({ companyId, account, providedSource
   });
 }
 
+async function resolveDestinationPasswordForAccount({ companyId, accountId, providedDestinationPassword }) {
+  if (providedDestinationPassword) return providedDestinationPassword;
+  const credentialResult = await db.query(
+    `SELECT secret_ciphertext
+     FROM credentials
+     WHERE company_id = $1
+       AND mail_account_id = $2
+       AND provider = 'imap'::provider_type
+       AND is_active = TRUE
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [companyId, accountId]
+  );
+  if (!credentialResult.rows.length) {
+    throw new Error("No hay contraseña IMAP de destino guardada para esta cuenta");
+  }
+  const data = parseCredentialSecret(credentialResult.rows[0].secret_ciphertext);
+  if (!data?.destinationPassword) {
+    throw new Error("La contraseña IMAP de destino guardada es invalida");
+  }
+  return data.destinationPassword;
+}
+
 async function runImapsync({ account, sourceToken, sourcePassword, destinationPassword, dryRun, runId }) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "hub-mimail-"));
   const cleanupPaths = [];
@@ -253,11 +276,11 @@ router.post("/run", requireRole(["superadmin", "company_admin", "operator"]), as
   const mailAccountId = safeTextOrNull(req.body?.mailAccountId, 36);
   const sourceTokenInput = safeTextOrNull(req.body?.sourceToken, 10000);
   const sourcePassword = safeTextOrNull(req.body?.sourcePassword, 256);
-  const destinationPassword = safeTextOrNull(req.body?.destinationPassword, 256);
+  const destinationPasswordInput = safeTextOrNull(req.body?.destinationPassword, 256);
   const dryRun = Boolean(req.body?.dryRun);
 
-  if (!mailAccountId || !destinationPassword) {
-    return res.status(400).json({ error: "mailAccountId y destinationPassword son requeridos" });
+  if (!mailAccountId) {
+    return res.status(400).json({ error: "mailAccountId es requerido" });
   }
 
   const accountResult = await db.query(
@@ -294,6 +317,17 @@ router.post("/run", requireRole(["superadmin", "company_admin", "operator"]), as
     });
   } catch (err) {
     return res.status(400).json({ error: err.message || "No se pudo resolver token OAuth2 de Microsoft" });
+  }
+
+  let destinationPassword = destinationPasswordInput;
+  try {
+    destinationPassword = await resolveDestinationPasswordForAccount({
+      companyId: req.user.companyId,
+      accountId: account.id,
+      providedDestinationPassword: destinationPasswordInput
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "No se pudo resolver contraseña de destino" });
   }
 
   const jobResult = await db.query(

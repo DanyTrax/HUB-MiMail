@@ -42,6 +42,7 @@ Servidor Express con JWT y RBAC basico:
 - `PATCH /mail-accounts/:id` (roles: `superadmin`, `company_admin`, `operator`)
 - `DELETE /mail-accounts/:id` (desactivacion logica)
 - `DELETE /mail-accounts/:id/permanent` (eliminacion definitiva)
+- `POST /mail-accounts/:id/destination-secret` (guardar password IMAP destino por cuenta)
 - `GET /users` (roles: `superadmin`, `company_admin`)
 - `POST /users` (crear/asignar usuario en empresa)
 - `PATCH /users/:id/role` (cambiar rol en empresa)
@@ -53,6 +54,7 @@ Servidor Express con JWT y RBAC basico:
 Notas de OAuth Microsoft:
 - La configuracion OAuth (clientId/clientSecret/tenantId/redirectUri/frontendOrigin) se guarda por empresa.
 - Si la cuenta Microsoft ya fue conectada por OAuth2, `POST /jobs/run` puede ejecutarse sin enviar `sourceToken`.
+- `POST /jobs/run` puede ejecutarse sin `destinationPassword` cuando la cuenta tiene clave destino guardada.
 - El backend usa el token guardado y renueva `access_token` automaticamente con `refresh_token` cuando expira.
 
 Usuario demo de desarrollo (seed):

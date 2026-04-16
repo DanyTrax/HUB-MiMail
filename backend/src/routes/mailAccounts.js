@@ -22,6 +22,14 @@ router.get("/", async (req, res) => {
       source_host AS "sourceHost",
       destination_host AS "destinationHost",
       is_active AS "isActive",
+      EXISTS (
+        SELECT 1
+        FROM credentials c
+        WHERE c.company_id = mail_accounts.company_id
+          AND c.mail_account_id = mail_accounts.id
+          AND c.provider = 'imap'::provider_type
+          AND c.is_active = TRUE
+      ) AS "hasDestinationSecret",
       metadata,
       created_at AS "createdAt",
       updated_at AS "updatedAt"
@@ -66,6 +74,7 @@ router.post(
         source_host AS "sourceHost",
         destination_host AS "destinationHost",
         is_active AS "isActive",
+        FALSE AS "hasDestinationSecret",
         metadata,
         created_at AS "createdAt",
         updated_at AS "updatedAt"
@@ -142,6 +151,14 @@ router.patch(
         source_host AS "sourceHost",
         destination_host AS "destinationHost",
         is_active AS "isActive",
+        EXISTS (
+          SELECT 1
+          FROM credentials c
+          WHERE c.company_id = mail_accounts.company_id
+            AND c.mail_account_id = mail_accounts.id
+            AND c.provider = 'imap'::provider_type
+            AND c.is_active = TRUE
+        ) AS "hasDestinationSecret",
         metadata,
         created_at AS "createdAt",
         updated_at AS "updatedAt"
@@ -158,6 +175,55 @@ router.patch(
 
     if (!rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
     return res.json(rows[0]);
+  }
+);
+
+router.post(
+  "/:id/destination-secret",
+  requireRole(["superadmin", "company_admin", "operator"]),
+  async (req, res) => {
+    const accountId = safeTextOrNull(req.params.id, 36);
+    const destinationPassword = safeTextOrNull(req.body?.destinationPassword, 256);
+    if (!accountId || !destinationPassword) {
+      return res.status(400).json({ error: "id y destinationPassword son requeridos" });
+    }
+
+    const accountResult = await db.query(
+      `SELECT id
+       FROM mail_accounts
+       WHERE id = $1
+         AND company_id = $2
+         AND is_active = TRUE`,
+      [accountId, req.user.companyId]
+    );
+    if (!accountResult.rows.length) {
+      return res.status(404).json({ error: "Cuenta no encontrada o inactiva" });
+    }
+
+    const secretCiphertext = JSON.stringify({
+      destinationPassword,
+      createdAt: new Date().toISOString()
+    });
+
+    const updateResult = await db.query(
+      `UPDATE credentials
+       SET secret_ciphertext = $4,
+           is_active = TRUE,
+           updated_at = NOW()
+       WHERE company_id = $1
+         AND mail_account_id = $2
+         AND provider = $3::provider_type`,
+      [req.user.companyId, accountId, "imap", secretCiphertext]
+    );
+    if (!updateResult.rowCount) {
+      await db.query(
+        `INSERT INTO credentials (company_id, mail_account_id, provider, secret_ciphertext, is_active)
+         VALUES ($1, $2, $3::provider_type, $4, TRUE)`,
+        [req.user.companyId, accountId, "imap", secretCiphertext]
+      );
+    }
+
+    return res.json({ ok: true });
   }
 );
 

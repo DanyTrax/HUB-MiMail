@@ -195,6 +195,7 @@
       card.appendChild(createTextLine("Host origen", item.sourceHost));
       card.appendChild(createTextLine("Host destino", item.destinationHost));
       card.appendChild(createTextLine("Activa", String(item.isActive)));
+      card.appendChild(createTextLine("Clave destino guardada", item.hasDestinationSecret ? "si" : "no"));
 
       const actions = document.createElement("div");
       actions.className = "row";
@@ -240,6 +241,28 @@
         await runMigration(item, false);
       });
       actions.appendChild(migrateBtn);
+
+      const saveDestPasswordBtn = document.createElement("button");
+      saveDestPasswordBtn.className = "secondary";
+      saveDestPasswordBtn.textContent = "Guardar clave destino";
+      saveDestPasswordBtn.addEventListener("click", async () => {
+        const destinationPassword = normalize(window.prompt("Contraseña IMAP destino"), 256);
+        if (!destinationPassword) {
+          setMessage("La contraseña de destino es requerida.", true);
+          return;
+        }
+        try {
+          await api(`/mail-accounts/${item.id}/destination-secret`, {
+            method: "POST",
+            body: { destinationPassword }
+          });
+          setMessage("Contraseña de destino guardada.");
+          await loadAccounts();
+        } catch (err) {
+          setMessage(err.message, true);
+        }
+      });
+      actions.appendChild(saveDestPasswordBtn);
 
       const disableBtn = document.createElement("button");
       disableBtn.className = "secondary";
@@ -391,11 +414,13 @@
   async function runMigration(account, dryRun) {
     const isMicrosoft = account.provider === "microsoft";
     const storedToken = isMicrosoft ? normalize(state.oauthTokensByAccount[account.id] || "", 10000) : "";
-    const sourceToken = isMicrosoft ? storedToken || normalize(window.prompt("Pega token OAuth2 de origen"), 10000) : "";
+    const sourceToken = isMicrosoft ? storedToken : "";
     const sourcePassword = !isMicrosoft ? normalize(window.prompt("Contraseña IMAP origen"), 256) : "";
-    const destinationPassword = normalize(window.prompt("Contraseña IMAP destino"), 256);
+    const destinationPassword = account.hasDestinationSecret
+      ? ""
+      : normalize(window.prompt("Contraseña IMAP destino"), 256);
 
-    if (!destinationPassword) {
+    if (!account.hasDestinationSecret && !destinationPassword) {
       setMessage("La contraseña de destino es requerida.", true);
       return;
     }
