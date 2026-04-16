@@ -13,13 +13,32 @@ const app = express();
 
 // Detras de Nginx Proxy Manager / Cloudflare llega X-Forwarded-*.
 // express-rate-limit requiere trust proxy para no lanzar ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
-const trustProxy = String(process.env.TRUST_PROXY || "1").toLowerCase();
-if (["1", "true", "yes", "on"].includes(trustProxy)) {
-  app.set("trust proxy", 1);
-} else if (trustProxy && trustProxy !== "0" && trustProxy !== "false") {
-  // Permite valores como "loopback, linklocal, uniquelocal" segun documentacion de Express
-  app.set("trust proxy", process.env.TRUST_PROXY);
+function resolveTrustProxy() {
+  const raw = process.env.TRUST_PROXY;
+  if (raw === undefined || String(raw).trim() === "") {
+    return 1;
+  }
+  const trimmed = String(raw).trim();
+  const lower = trimmed.toLowerCase();
+  if (["1", "true", "yes", "on"].includes(lower)) {
+    return 1;
+  }
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  if (["0", "false", "no", "off"].includes(lower)) {
+    // Con X-Forwarded-For (NPM/Cloudflare) y rate-limit, "0" deja trust proxy en false y rompe /auth.
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[hub-backend] TRUST_PROXY desactiva trust proxy; con reverse proxy debe ser al menos 1. Usando 1. Quita TRUST_PROXY o pon TRUST_PROXY=1 en .env."
+    );
+    return 1;
+  }
+  // Valores tipo "loopback, linklocal, uniquelocal" (documentacion Express)
+  return trimmed;
 }
+
+app.set("trust proxy", resolveTrustProxy());
 
 app.disable("x-powered-by");
 app.use(baseHelmet);
