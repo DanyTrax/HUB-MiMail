@@ -30,6 +30,14 @@ router.get("/", async (req, res) => {
           AND c.provider = 'imap'::provider_type
           AND c.is_active = TRUE
       ) AS "hasDestinationSecret",
+      EXISTS (
+        SELECT 1
+        FROM credentials c
+        WHERE c.company_id = mail_accounts.company_id
+          AND c.mail_account_id = mail_accounts.id
+          AND c.provider = 'microsoft'::provider_type
+          AND c.is_active = TRUE
+      ) AS "hasMicrosoftOauth",
       metadata,
       created_at AS "createdAt",
       updated_at AS "updatedAt"
@@ -75,6 +83,7 @@ router.post(
         destination_host AS "destinationHost",
         is_active AS "isActive",
         FALSE AS "hasDestinationSecret",
+        FALSE AS "hasMicrosoftOauth",
         metadata,
         created_at AS "createdAt",
         updated_at AS "updatedAt"
@@ -159,6 +168,14 @@ router.patch(
             AND c.provider = 'imap'::provider_type
             AND c.is_active = TRUE
         ) AS "hasDestinationSecret",
+        EXISTS (
+          SELECT 1
+          FROM credentials c
+          WHERE c.company_id = mail_accounts.company_id
+            AND c.mail_account_id = mail_accounts.id
+            AND c.provider = 'microsoft'::provider_type
+            AND c.is_active = TRUE
+        ) AS "hasMicrosoftOauth",
         metadata,
         created_at AS "createdAt",
         updated_at AS "updatedAt"

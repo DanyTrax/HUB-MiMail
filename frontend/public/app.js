@@ -196,6 +196,9 @@
       card.appendChild(createTextLine("Host destino", item.destinationHost));
       card.appendChild(createTextLine("Activa", String(item.isActive)));
       card.appendChild(createTextLine("Clave destino guardada", item.hasDestinationSecret ? "si" : "no"));
+      if (item.provider === "microsoft") {
+        card.appendChild(createTextLine("OAuth Microsoft", item.hasMicrosoftOauth ? "conectado" : "pendiente"));
+      }
 
       const actions = document.createElement("div");
       actions.className = "row";
@@ -230,6 +233,10 @@
       const testBtn = document.createElement("button");
       testBtn.className = "secondary";
       testBtn.textContent = "Probar login";
+      if (item.provider === "microsoft" && !item.hasMicrosoftOauth) {
+        testBtn.disabled = true;
+        testBtn.title = "Conecta OAuth2 para habilitar esta accion";
+      }
       testBtn.addEventListener("click", async () => {
         await runMigration(item, true);
       });
@@ -237,6 +244,10 @@
 
       const migrateBtn = document.createElement("button");
       migrateBtn.textContent = "Migrar ahora";
+      if (item.provider === "microsoft" && !item.hasMicrosoftOauth) {
+        migrateBtn.disabled = true;
+        migrateBtn.title = "Conecta OAuth2 para habilitar esta accion";
+      }
       migrateBtn.addEventListener("click", async () => {
         await runMigration(item, false);
       });
@@ -322,6 +333,9 @@
       card.appendChild(createTextLine("Inicio", run.startedAt));
       card.appendChild(createTextLine("Fin", run.finishedAt));
       card.appendChild(createTextLine("Resumen", run.summary));
+      if (run.errorDetail) {
+        card.appendChild(createTextLine("Detalle", String(run.errorDetail).slice(0, 260)));
+      }
       el.runsList.appendChild(card);
     }
   }
@@ -413,6 +427,10 @@
 
   async function runMigration(account, dryRun) {
     const isMicrosoft = account.provider === "microsoft";
+    if (isMicrosoft && !account.hasMicrosoftOauth) {
+      setMessage("Esta cuenta Microsoft no esta conectada por OAuth2. Pulsa primero 'Conectar OAuth2'.", true);
+      return;
+    }
     const storedToken = isMicrosoft ? normalize(state.oauthTokensByAccount[account.id] || "", 10000) : "";
     const sourceToken = isMicrosoft ? storedToken : "";
     const sourcePassword = !isMicrosoft ? normalize(window.prompt("Contraseña IMAP origen"), 256) : "";
@@ -648,4 +666,12 @@
   });
 
   bootstrapSession();
+  setInterval(async () => {
+    if (!state.token || el.appSection.classList.contains("hidden")) return;
+    try {
+      await loadRuns();
+    } catch (_err) {
+      // Silencioso para no interrumpir la operacion del usuario.
+    }
+  }, 6000);
 })();

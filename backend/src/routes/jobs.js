@@ -380,6 +380,7 @@ router.get("/runs", requireRole(["superadmin", "company_admin", "operator", "sch
       jr.finished_at AS "finishedAt",
       jr.status::text AS status,
       jr.summary,
+      jr.details,
       j.job_name AS "jobName"
      FROM job_runs jr
      INNER JOIN jobs j ON j.id = jr.job_id
@@ -388,7 +389,14 @@ router.get("/runs", requireRole(["superadmin", "company_admin", "operator", "sch
      LIMIT 30`,
     [req.user.companyId]
   );
-  return res.json({ items: result.rows });
+  const items = result.rows.map((row) => {
+    const details = row.details || {};
+    return {
+      ...row,
+      errorDetail: details?.error || details?.stderrTail || null
+    };
+  });
+  return res.json({ items });
 });
 
 module.exports = router;
