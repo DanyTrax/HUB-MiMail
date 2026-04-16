@@ -23,16 +23,17 @@ function resolveTrustProxy() {
   if (["1", "true", "yes", "on"].includes(lower)) {
     return 1;
   }
-  if (/^\d+$/.test(trimmed)) {
-    return Number(trimmed);
-  }
+  // "0" debe ir antes del chequeo numerico: /^\d+$/ incluye "0" y Number("0") rompe detras de proxy.
   if (["0", "false", "no", "off"].includes(lower)) {
-    // Con X-Forwarded-For (NPM/Cloudflare) y rate-limit, "0" deja trust proxy en false y rompe /auth.
     // eslint-disable-next-line no-console
     console.warn(
       "[hub-backend] TRUST_PROXY desactiva trust proxy; con reverse proxy debe ser al menos 1. Usando 1. Quita TRUST_PROXY o pon TRUST_PROXY=1 en .env."
     );
     return 1;
+  }
+  // Solo enteros >= 1 (saltos de proxy). "00" u otros quedan fuera y se tratan como string para Express.
+  if (/^[1-9]\d*$/.test(trimmed)) {
+    return Number(trimmed);
   }
   // Valores tipo "loopback, linklocal, uniquelocal" (documentacion Express)
   return trimmed;
