@@ -3,11 +3,13 @@
     return `${window.location.origin}/api`;
   }
 
-  function loadApiBaseFromStorage() {
-    const stored = sessionStorage.getItem("apiBase");
+  function resolveStoredApiBase(stored) {
     if (!stored) return inferDefaultApiBase();
     try {
       const u = new URL(stored);
+      if (u.origin !== window.location.origin) {
+        return inferDefaultApiBase();
+      }
       if (
         u.port === "4000" &&
         u.hostname === window.location.hostname &&
@@ -19,6 +21,32 @@
       return inferDefaultApiBase();
     }
     return stored;
+  }
+
+  function persistApiBaseIfNeeded(resolved) {
+    const prev = sessionStorage.getItem("apiBase");
+    if (prev !== resolved) {
+      sessionStorage.setItem("apiBase", resolved);
+    }
+  }
+
+  function resolveApiBaseForRequest() {
+    let base = (state.apiBase || "").replace(/\/$/, "") || inferDefaultApiBase();
+    try {
+      const u = new URL(base);
+      if (u.origin !== window.location.origin) {
+        base = inferDefaultApiBase().replace(/\/$/, "");
+        state.apiBase = base;
+        sessionStorage.setItem("apiBase", base);
+        if (el.apiBase) el.apiBase.value = base;
+      }
+    } catch (_err) {
+      base = inferDefaultApiBase().replace(/\/$/, "");
+      state.apiBase = base;
+      sessionStorage.setItem("apiBase", base);
+      if (el.apiBase) el.apiBase.value = base;
+    }
+    return base;
   }
 
   function expectedOAuthPopupOrigin() {
@@ -38,10 +66,13 @@
     return `${window.location.protocol}//${window.location.hostname}:4000/auth/microsoft/callback`;
   }
 
+  const initialApiBase = resolveStoredApiBase(sessionStorage.getItem("apiBase"));
+  persistApiBaseIfNeeded(initialApiBase);
+
   const state = {
     token: sessionStorage.getItem("token") || "",
     user: null,
-    apiBase: loadApiBaseFromStorage(),
+    apiBase: initialApiBase,
     oauthTokensByAccount: JSON.parse(sessionStorage.getItem("oauthTokensByAccount") || "{}"),
     microsoftConfig: null,
     accounts: [],
@@ -104,17 +135,27 @@
   }
 
   async function api(path, options = {}) {
+    const base = resolveApiBaseForRequest();
+    const url = `${base}${path.startsWith("/") ? path : `/${path}`}`;
     const headers = {
       "Content-Type": "application/json",
       ...(options.headers || {})
     };
     if (state.token) headers.Authorization = `Bearer ${state.token}`;
 
-    const response = await fetch(`${state.apiBase}${path}`, {
-      method: options.method || "GET",
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined
-    });
+    let response;
+    try {
+      response = await fetch(url, {
+        method: options.method || "GET",
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+    } catch (err) {
+      const msg = err && err.message ? err.message : "Error de red";
+      throw new Error(
+        `${msg} al llamar ${url}. Si acabas de actualizar, vacia cache del sitio o borra sessionStorage (apiBase) y recarga.`
+      );
+    }
 
     if (response.status === 204) return null;
 
