@@ -1,8 +1,47 @@
 (() => {
+  function inferDefaultApiBase() {
+    return `${window.location.origin}/api`;
+  }
+
+  function loadApiBaseFromStorage() {
+    const stored = sessionStorage.getItem("apiBase");
+    if (!stored) return inferDefaultApiBase();
+    try {
+      const u = new URL(stored);
+      if (
+        u.port === "4000" &&
+        u.hostname === window.location.hostname &&
+        window.location.port !== "4000"
+      ) {
+        return inferDefaultApiBase();
+      }
+    } catch (_err) {
+      return inferDefaultApiBase();
+    }
+    return stored;
+  }
+
+  function expectedOAuthPopupOrigin() {
+    try {
+      const u = new URL(state.apiBase);
+      const path = u.pathname.replace(/\/$/, "") || "/";
+      if (path === "/api" || path.endsWith("/api")) {
+        return `${u.protocol}//${u.hostname}:4000`;
+      }
+      return u.origin;
+    } catch (_err) {
+      return `${window.location.protocol}//${window.location.hostname}:4000`;
+    }
+  }
+
+  function defaultMicrosoftRedirectUri() {
+    return `${window.location.protocol}//${window.location.hostname}:4000/auth/microsoft/callback`;
+  }
+
   const state = {
     token: sessionStorage.getItem("token") || "",
     user: null,
-    apiBase: sessionStorage.getItem("apiBase") || `${window.location.protocol}//${window.location.hostname}:4000`,
+    apiBase: loadApiBaseFromStorage(),
     oauthTokensByAccount: JSON.parse(sessionStorage.getItem("oauthTokensByAccount") || "{}"),
     microsoftConfig: null,
     accounts: [],
@@ -42,14 +81,6 @@
   function setMessage(message, isError = false) {
     el.message.textContent = message || "";
     el.message.style.color = isError ? "#fca5a5" : "#fcd34d";
-  }
-
-  function parseOrigin(urlValue) {
-    try {
-      return new URL(urlValue).origin;
-    } catch (_err) {
-      return "";
-    }
   }
 
   function setAuth(token, user) {
@@ -304,7 +335,7 @@
     document.getElementById("msClientId").value = config?.clientId || "";
     document.getElementById("msClientSecret").value = "";
     document.getElementById("msTenantId").value = config?.tenantId || "common";
-    document.getElementById("msRedirectUri").value = config?.redirectUri || `${state.apiBase}/auth/microsoft/callback`;
+    document.getElementById("msRedirectUri").value = config?.redirectUri || defaultMicrosoftRedirectUri();
     document.getElementById("msFrontendOrigin").value = config?.frontendOrigin || window.location.origin;
     document.getElementById("msIsActive").value = config?.isActive === false ? "false" : "true";
   }
@@ -389,7 +420,8 @@
       password: normalize(document.getElementById("password").value, 256),
       companySlug: normalize(document.getElementById("companySlug").value, 120).toLowerCase()
     };
-    state.apiBase = normalize(el.apiBase.value, 200);
+    const rawApi = normalize(el.apiBase.value, 200);
+    state.apiBase = rawApi || inferDefaultApiBase();
     sessionStorage.setItem("apiBase", state.apiBase);
 
     try {
@@ -523,8 +555,8 @@
   }
 
   window.addEventListener("message", (event) => {
-    const apiOrigin = parseOrigin(state.apiBase);
-    if (!apiOrigin || event.origin !== apiOrigin) return;
+    const allowedOrigin = expectedOAuthPopupOrigin();
+    if (!allowedOrigin || event.origin !== allowedOrigin) return;
     const data = event.data || {};
     if (data.type === "microsoft-oauth-success" && data.accountId && data.accessToken) {
       saveOauthToken(data.accountId, normalize(data.accessToken, 10000));
