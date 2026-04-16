@@ -208,10 +208,9 @@ async function runImapsync({ account, sourceToken, sourcePassword, destinationPa
     ];
 
     if (sourceToken) {
-      const tokenPath = path.join(tempDir, "source_token.txt");
-      await fs.writeFile(tokenPath, `${sourceToken}\n`, { mode: 0o600 });
-      cleanupPaths.push(tokenPath);
-      args.push("--authmech1", "XOAUTH2", "--oauthaccesstoken1", tokenPath);
+      // imapsync espera el token OAuth en texto plano en --oauthaccesstoken1,
+      // no una ruta de archivo. Pasar el path provoca fallo de autenticacion.
+      args.push("--authmech1", "XOAUTH2", "--oauthaccesstoken1", sourceToken);
     } else {
       const pass1Path = path.join(tempDir, "source_password.txt");
       await fs.writeFile(pass1Path, `${sourcePassword}\n`, { mode: 0o600 });
