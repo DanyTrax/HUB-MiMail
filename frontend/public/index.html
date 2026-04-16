@@ -160,9 +160,17 @@
                 <option value="false">Inactivo</option>
               </select>
             </label>
-            <button type="submit">Guardar configuracion</button>
+            <div class="row" style="flex-wrap: wrap; gap: 0.5rem">
+              <button type="submit">Guardar configuracion</button>
+              <button type="button" id="msValidateBtn" class="secondary">Comprobar (Azure / BD)</button>
+            </div>
           </form>
-          <p class="hint">Esta configuracion es por empresa y se usa en el boton "Conectar OAuth2".</p>
+          <p class="hint">
+            Esta configuracion es por empresa y se usa en el boton "Conectar OAuth2". El Redirect URI debe coincidir
+            literalmente con el de Azure (https, dominio y ruta <code>/auth/microsoft/callback</code>). El boton
+            Comprobar valida formato y que Microsoft responda para el Tenant; no prueba el secreto ni el login del
+            usuario final.
+          </p>
         </div>
       </section>
 

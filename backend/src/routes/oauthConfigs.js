@@ -9,6 +9,91 @@ const router = express.Router();
 router.use(requireAuth);
 router.use(requireRole(["superadmin", "company_admin"]));
 
+async function fetchWithTimeout(url, ms = 8000) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    return await fetch(url, { signal: ac.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Comprueba datos guardados (sin exponer secretos): formato, HTTPS y que Microsoft responda metadata del tenant.
+ */
+router.get("/microsoft/check", async (req, res) => {
+  const result = await db.query(
+    `SELECT
+      client_id AS "clientId",
+      tenant_id AS "tenantId",
+      redirect_uri AS "redirectUri",
+      frontend_origin AS "frontendOrigin",
+      is_active AS "isActive"
+     FROM oauth_provider_configs
+     WHERE company_id = $1
+       AND provider = 'microsoft'::provider_type
+     LIMIT 1`,
+    [req.user.companyId]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return res.json({
+      ok: false,
+      checks: {},
+      hint: "No hay configuracion guardada. Completa el formulario y pulsa Guardar."
+    });
+  }
+
+  const checks = {
+    clientIdPresent: Boolean(row.clientId && String(row.clientId).length >= 8),
+    tenantPresent: Boolean(row.tenantId && String(row.tenantId).trim()),
+    redirectUriHttps:
+      /^https:\/\//i.test(row.redirectUri || "") ||
+      /^http:\/\/localhost(?::\d+)?\//i.test(row.redirectUri || ""),
+    redirectUriCallbackPath: /\/auth\/microsoft\/callback/i.test(row.redirectUri || ""),
+    frontendOriginHttps:
+      /^https:\/\//i.test(row.frontendOrigin || "") ||
+      /^http:\/\/localhost(?::\d+)?$/i.test(row.frontendOrigin || ""),
+    configActive: row.isActive === true
+  };
+
+  let microsoftTenantMetadata = false;
+  let microsoftTenantMetadataDetail = null;
+  try {
+    const tenant = encodeURIComponent((row.tenantId || "common").trim());
+    const metaUrl = `https://login.microsoftonline.com/${tenant}/v2.0/.well-known/openid-configuration`;
+    const r = await fetchWithTimeout(metaUrl, 8000);
+    microsoftTenantMetadata = r.ok;
+    if (!r.ok) microsoftTenantMetadataDetail = `HTTP ${r.status}`;
+  } catch (err) {
+    microsoftTenantMetadataDetail = err.name === "AbortError" ? "timeout" : err.message;
+  }
+  checks.microsoftTenantMetadata = microsoftTenantMetadata;
+  if (microsoftTenantMetadataDetail) {
+    checks.microsoftTenantMetadataDetail = microsoftTenantMetadataDetail;
+  }
+
+  const ok =
+    checks.clientIdPresent &&
+    checks.tenantPresent &&
+    checks.redirectUriHttps &&
+    checks.redirectUriCallbackPath &&
+    checks.frontendOriginHttps &&
+    checks.configActive &&
+    checks.microsoftTenantMetadata;
+
+  return res.json({
+    ok,
+    checks,
+    azure: {
+      redirectUriMustMatchExactly: row.redirectUri,
+      note:
+        "En Azure Entra ID > Registro de aplicaciones > Autenticacion: agrega exactamente esta Redirect URI (tipo Web). El Client ID y Tenant deben ser de esa misma app."
+    }
+  });
+});
+
 router.get("/microsoft", async (req, res) => {
   const result = await db.query(
     `SELECT

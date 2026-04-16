@@ -119,6 +119,7 @@
     oauthSection: document.getElementById("oauthSection"),
     userForm: document.getElementById("userForm"),
     oauthForm: document.getElementById("oauthForm"),
+    msValidateBtn: document.getElementById("msValidateBtn"),
     usersList: document.getElementById("usersList"),
     usersCount: document.getElementById("usersCount"),
     runsList: document.getElementById("runsList")
@@ -227,33 +228,51 @@
         const connectBtn = document.createElement("button");
         connectBtn.className = "secondary";
         connectBtn.textContent = state.oauthTokensByAccount[item.id] ? "Actualizar OAuth2" : "Conectar OAuth2";
-        connectBtn.addEventListener("click", async () => {
-          try {
-            await loadMicrosoftConfig();
-            if (!state.microsoftConfig?.redirectUri) {
-              setMessage(
-                "Falta Redirect URI en Configuracion Microsoft; el panel no puede validar el mensaje del popup.",
-                true
-              );
-              return;
-            }
-            const result = await api("/auth/microsoft/connect-url", {
-              method: "POST",
-              body: { mailAccountId: item.id, frontendOrigin: window.location.origin }
-            });
-            const popup = window.open(
-              result.authorizeUrl,
-              "microsoft-oauth",
-              "popup=yes,width=560,height=720"
+        connectBtn.addEventListener("click", () => {
+          const popupFeatures =
+            "width=560,height=720,left=80,top=80,scrollbars=yes,resizable=yes,status=no,toolbar=no,menubar=no";
+          const popup = window.open("about:blank", "hub_microsoft_oauth", popupFeatures);
+          if (!popup || popup.closed) {
+            setMessage(
+              "No se pudo abrir la ventana OAuth2. Permite ventanas emergentes para este sitio e intenta de nuevo.",
+              true
             );
-            if (!popup) {
-              setMessage("Tu navegador bloqueó la ventana OAuth2. Habilita popups e intenta de nuevo.", true);
-              return;
-            }
-            setMessage("Sigue el login en la ventana emergente de Microsoft.");
-          } catch (err) {
-            setMessage(err.message, true);
+            return;
           }
+          try {
+            popup.document.write(
+              "<!doctype html><meta charset=\"utf-8\"><title>Microsoft</title><p style=\"font-family:sans-serif;padding:1rem\">Conectando con Microsoft…</p>"
+            );
+            popup.document.close();
+          } catch (_e) {
+            // Algunos navegadores restringen document en about:blank; basta con navegar luego.
+          }
+          void (async () => {
+            try {
+              await loadMicrosoftConfig();
+              if (!state.microsoftConfig?.redirectUri) {
+                popup.close();
+                setMessage(
+                  "Falta Redirect URI en Configuracion Microsoft; guarda la configuracion y usa Comprobar.",
+                  true
+                );
+                return;
+              }
+              const result = await api("/auth/microsoft/connect-url", {
+                method: "POST",
+                body: { mailAccountId: item.id, frontendOrigin: window.location.origin }
+              });
+              popup.location.href = result.authorizeUrl;
+              setMessage("Completa el inicio de sesion en la ventana de Microsoft (puedes moverla; no debe ser una pestaña del panel).");
+            } catch (err) {
+              try {
+                popup.close();
+              } catch (_e2) {
+                // ignore
+              }
+              setMessage(err.message, true);
+            }
+          })();
         });
         actions.appendChild(connectBtn);
       }
@@ -653,6 +672,38 @@
         setMessage("Usuario creado/actualizado.");
         el.userForm.reset();
         await loadUsers();
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
+
+  if (el.msValidateBtn) {
+    el.msValidateBtn.addEventListener("click", async () => {
+      setMessage("Comprobando configuracion Microsoft…");
+      try {
+        const r = await api("/oauth-configs/microsoft/check");
+        if (r.hint) {
+          setMessage(r.hint, true);
+          return;
+        }
+        const c = r.checks || {};
+        const lines = [
+          `Comprobacion Microsoft: ${r.ok ? "OK" : "revisar campos"}`,
+          `clientId=${c.clientIdPresent ? "ok" : "falta"}`,
+          `tenantMetadata=${c.microsoftTenantMetadata ? "ok" : "fallo"}${
+            c.microsoftTenantMetadataDetail ? `(${c.microsoftTenantMetadataDetail})` : ""
+          }`,
+          `redirectHttps=${c.redirectUriHttps ? "ok" : "no"}`,
+          `callbackPath=${c.redirectUriCallbackPath ? "ok" : "no"}`,
+          `frontendHttps=${c.frontendOriginHttps ? "ok" : "no"}`,
+          `activo=${c.configActive ? "si" : "no"}`
+        ];
+        if (r.azure?.redirectUriMustMatchExactly) {
+          lines.push(`redirectUri BD: ${r.azure.redirectUriMustMatchExactly}`);
+        }
+        if (r.azure?.note) lines.push(r.azure.note);
+        setMessage(lines.join(" | "), !r.ok);
       } catch (err) {
         setMessage(err.message, true);
       }

@@ -90,6 +90,8 @@ button.danger {
 .message {
   min-height: 24px;
   color: #fcd34d;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .pre {
