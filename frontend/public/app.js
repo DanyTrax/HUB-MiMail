@@ -82,6 +82,25 @@
     return false;
   }
 
+  /**
+   * Abre ventana auxiliar en el mismo tick del clic (requisito del navegador).
+   * Nombre unico: si se reutiliza el mismo nombre, Chrome suele convertirlo en pestaña.
+   * Cadena de features sin espacios: si hay tokens desconocidos, algunos navegadores ignoran todo el string.
+   */
+  function openMicrosoftOAuthShell() {
+    const w = 560;
+    const h = 720;
+    const sw = window.screen?.availWidth || window.screen?.width || 1280;
+    const sh = window.screen?.availHeight || window.screen?.height || 800;
+    const ox = window.screen?.availLeft ?? 0;
+    const oy = window.screen?.availTop ?? 0;
+    const left = Math.max(0, Math.round(ox + (sw - w) / 2));
+    const top = Math.max(0, Math.round(oy + (sh - h) / 2));
+    const features = `width=${w},height=${h},left=${left},top=${top},scrollbars=yes,resizable=yes`;
+    const name = `hub_ms_oauth_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+    return window.open("about:blank", name, features);
+  }
+
   function defaultMicrosoftRedirectUri() {
     return `${window.location.protocol}//${window.location.hostname}:4000/auth/microsoft/callback`;
   }
@@ -229,23 +248,13 @@
         connectBtn.className = "secondary";
         connectBtn.textContent = state.oauthTokensByAccount[item.id] ? "Actualizar OAuth2" : "Conectar OAuth2";
         connectBtn.addEventListener("click", () => {
-          const popupFeatures =
-            "width=560,height=720,left=80,top=80,scrollbars=yes,resizable=yes,status=no,toolbar=no,menubar=no";
-          const popup = window.open("about:blank", "hub_microsoft_oauth", popupFeatures);
+          const popup = openMicrosoftOAuthShell();
           if (!popup || popup.closed) {
             setMessage(
-              "No se pudo abrir la ventana OAuth2. Permite ventanas emergentes para este sitio e intenta de nuevo.",
+              "No se pudo abrir la ventana OAuth2. En Chrome: icono de candado > Ventanas emergentes > Permitir. En Safari: Ajustes > Sitios web > Ventanas emergentes.",
               true
             );
             return;
-          }
-          try {
-            popup.document.write(
-              "<!doctype html><meta charset=\"utf-8\"><title>Microsoft</title><p style=\"font-family:sans-serif;padding:1rem\">Conectando con Microsoft…</p>"
-            );
-            popup.document.close();
-          } catch (_e) {
-            // Algunos navegadores restringen document en about:blank; basta con navegar luego.
           }
           void (async () => {
             try {
@@ -263,7 +272,9 @@
                 body: { mailAccountId: item.id, frontendOrigin: window.location.origin }
               });
               popup.location.href = result.authorizeUrl;
-              setMessage("Completa el inicio de sesion en la ventana de Microsoft (puedes moverla; no debe ser una pestaña del panel).");
+              setMessage(
+                "Completa el login en la ventana o pestaña que se abrio. Si fue pestaña, es normal en algunos navegadores; al terminar, vuelve aqui y deberia actualizarse el estado."
+              );
             } catch (err) {
               try {
                 popup.close();
