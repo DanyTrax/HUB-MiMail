@@ -45,6 +45,46 @@
           <pre id="sessionInfo" class="pre"></pre>
         </div>
 
+        <div id="companiesSection" class="card hidden">
+          <h2>Empresas</h2>
+          <p class="hint">
+            Solo visible para <code>superadmin</code>. Crea una empresa nueva y asigna un administrador
+            (<code>company_admin</code>) en esa empresa. El slug es el que usan en el login junto al email.
+          </p>
+          <div class="row between">
+            <span id="companiesCount" class="hint"></span>
+            <button type="button" id="refreshCompaniesBtn" class="secondary">Actualizar lista</button>
+          </div>
+          <div id="companiesList" class="list"></div>
+          <form id="companyForm" class="form grid">
+            <label>
+              Nombre empresa
+              <input id="coName" type="text" required maxlength="160" />
+            </label>
+            <label>
+              Slug (empresa en login)
+              <input id="coSlug" type="text" required placeholder="ej: acme-corp" />
+            </label>
+            <label>
+              Email administrador
+              <input id="coAdminEmail" type="email" required autocomplete="username" />
+            </label>
+            <label>
+              Nombre completo administrador
+              <input id="coAdminFullName" type="text" required />
+            </label>
+            <label>
+              Contraseña administrador
+              <input id="coAdminPassword" type="password" autocomplete="new-password" />
+            </label>
+            <p class="hint">
+              Si el email ya existe como usuario, no hace falta contraseña: solo se vincula como admin a la nueva
+              empresa (usa su contraseña actual para entrar).
+            </p>
+            <button type="submit">Crear empresa</button>
+          </form>
+        </div>
+
         <div class="card">
           <h2>Nueva cuenta de correo</h2>
           <form id="accountForm" class="form grid">

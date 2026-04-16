@@ -114,6 +114,7 @@
     apiBase: initialApiBase,
     oauthTokensByAccount: JSON.parse(sessionStorage.getItem("oauthTokensByAccount") || "{}"),
     microsoftConfig: null,
+    companies: [],
     accounts: [],
     users: [],
     runs: [],
@@ -147,7 +148,12 @@
     accountSelectAllBtn: document.getElementById("accountSelectAllBtn"),
     accountSelectNoneBtn: document.getElementById("accountSelectNoneBtn"),
     accountQueueDryBtn: document.getElementById("accountQueueDryBtn"),
-    accountQueueMigrateBtn: document.getElementById("accountQueueMigrateBtn")
+    accountQueueMigrateBtn: document.getElementById("accountQueueMigrateBtn"),
+    companiesSection: document.getElementById("companiesSection"),
+    companiesList: document.getElementById("companiesList"),
+    companiesCount: document.getElementById("companiesCount"),
+    refreshCompaniesBtn: document.getElementById("refreshCompaniesBtn"),
+    companyForm: document.getElementById("companyForm")
   };
 
   function normalize(value, max = 255) {
@@ -517,6 +523,30 @@
     document.getElementById("msIsActive").value = config?.isActive === false ? "false" : "true";
   }
 
+  async function loadCompanies() {
+    if (state.user?.role !== "superadmin") return;
+    const result = await api("/companies");
+    state.companies = Array.isArray(result?.items) ? result.items : [];
+    renderCompanies();
+  }
+
+  function renderCompanies() {
+    if (!el.companiesList || !el.companiesCount) return;
+    el.companiesList.replaceChildren();
+    el.companiesCount.textContent = `Total empresas: ${state.companies.length}`;
+    for (const c of state.companies) {
+      const card = document.createElement("article");
+      card.className = "item";
+      const title = document.createElement("h3");
+      title.textContent = c.name;
+      card.appendChild(title);
+      card.appendChild(createTextLine("Slug (login)", c.slug));
+      card.appendChild(createTextLine("Activa", String(c.isActive)));
+      card.appendChild(createTextLine("Id", c.id));
+      el.companiesList.appendChild(card);
+    }
+  }
+
   async function loadMicrosoftConfig() {
     if (!state.user || !["superadmin", "company_admin"].includes(state.user.role)) return;
     const result = await api("/oauth-configs/microsoft");
@@ -680,10 +710,16 @@
       if (el.oauthSection) {
         el.oauthSection.classList.toggle("hidden", !["superadmin", "company_admin"].includes(state.user.role));
       }
+      if (el.companiesSection) {
+        el.companiesSection.classList.toggle("hidden", state.user.role !== "superadmin");
+      }
       renderSession();
       await loadAccounts();
       await loadUsers();
       await loadMicrosoftConfig();
+      if (state.user.role === "superadmin") {
+        await loadCompanies();
+      }
       await loadRuns();
     } catch (_err) {
       clearAuth();
@@ -721,9 +757,15 @@
       if (el.oauthSection) {
         el.oauthSection.classList.toggle("hidden", !["superadmin", "company_admin"].includes(result.user.role));
       }
+      if (el.companiesSection) {
+        el.companiesSection.classList.toggle("hidden", result.user.role !== "superadmin");
+      }
       await loadAccounts();
       await loadUsers();
       await loadMicrosoftConfig();
+      if (result.user.role === "superadmin") {
+        await loadCompanies();
+      }
       await loadRuns();
       setMessage("Sesión iniciada correctamente.");
     } catch (err) {
@@ -819,6 +861,46 @@
       try {
         await loadMicrosoftConfig();
         setMessage("Configuracion Microsoft actualizada.");
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
+
+  if (el.refreshCompaniesBtn) {
+    el.refreshCompaniesBtn.addEventListener("click", async () => {
+      try {
+        await loadCompanies();
+        setMessage("Lista de empresas actualizada.");
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
+
+  if (el.companyForm) {
+    el.companyForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setMessage("");
+      const adminPassword = normalize(document.getElementById("coAdminPassword").value, 256);
+      const slugRaw = normalize(document.getElementById("coSlug").value, 120)
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-");
+      const body = {
+        name: normalize(document.getElementById("coName").value, 160),
+        slug: slugRaw,
+        adminEmail: normalize(document.getElementById("coAdminEmail").value, 190).toLowerCase(),
+        adminFullName: normalize(document.getElementById("coAdminFullName").value, 160)
+      };
+      if (adminPassword) {
+        body.adminPassword = adminPassword;
+      }
+      try {
+        await api("/companies", { method: "POST", body });
+        setMessage("Empresa creada. El admin puede entrar con su email + slug de empresa.");
+        el.companyForm.reset();
+        await loadCompanies();
       } catch (err) {
         setMessage(err.message, true);
       }
@@ -925,6 +1007,7 @@
     if (el.usersList) el.usersList.replaceChildren();
     if (el.runsList) el.runsList.replaceChildren();
     if (el.oauthSection) el.oauthSection.classList.add("hidden");
+    if (el.companiesSection) el.companiesSection.classList.add("hidden");
     setMessage("Sesión cerrada.");
   });
 

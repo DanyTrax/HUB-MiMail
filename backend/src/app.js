@@ -8,6 +8,7 @@ const mailAccountRoutes = require("./routes/mailAccounts");
 const userRoutes = require("./routes/users");
 const jobRoutes = require("./routes/jobs");
 const oauthConfigRoutes = require("./routes/oauthConfigs");
+const companyRoutes = require("./routes/companies");
 
 const app = express();
 
@@ -61,6 +62,7 @@ app.use("/mail-accounts", mailAccountRoutes);
 app.use("/users", userRoutes);
 app.use("/jobs", jobRoutes);
 app.use("/oauth-configs", oauthConfigRoutes);
+app.use("/companies", companyRoutes);
 
 app.use((err, req, res, next) => {
   // eslint-disable-next-line no-console
