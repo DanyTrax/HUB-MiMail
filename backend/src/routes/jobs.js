@@ -268,7 +268,8 @@ async function runImapsync({ account, sourceToken, sourcePassword, destinationPa
           runId,
           status,
           exitCode: code,
-          stderrTail: stderrBuffer.slice(-500)
+          stderrTail: stderrBuffer.slice(-500),
+          stdoutTail: stdoutBuffer.slice(-500)
         });
         await db.query(
           `UPDATE job_runs
@@ -437,7 +438,7 @@ router.get("/runs", requireRole(["superadmin", "company_admin", "operator", "sch
     const details = row.details || {};
     return {
       ...row,
-      errorDetail: details?.error || details?.stderrTail || null
+      errorDetail: details?.error || details?.stderrTail || details?.stdoutTail || null
     };
   });
   return res.json({ items });

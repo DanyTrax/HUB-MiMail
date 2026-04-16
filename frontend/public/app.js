@@ -408,7 +408,7 @@
       card.appendChild(createTextLine("Fin", run.finishedAt));
       card.appendChild(createTextLine("Resumen", run.summary));
       if (run.errorDetail) {
-        card.appendChild(createTextLine("Detalle", String(run.errorDetail).slice(0, 260)));
+        card.appendChild(createTextLine("Detalle", String(run.errorDetail).slice(0, 1200)));
       }
       el.runsList.appendChild(card);
     }
