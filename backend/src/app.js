@@ -11,6 +11,16 @@ const oauthConfigRoutes = require("./routes/oauthConfigs");
 
 const app = express();
 
+// Detras de Nginx Proxy Manager / Cloudflare llega X-Forwarded-*.
+// express-rate-limit requiere trust proxy para no lanzar ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+const trustProxy = String(process.env.TRUST_PROXY || "1").toLowerCase();
+if (["1", "true", "yes", "on"].includes(trustProxy)) {
+  app.set("trust proxy", 1);
+} else if (trustProxy && trustProxy !== "0" && trustProxy !== "false") {
+  // Permite valores como "loopback, linklocal, uniquelocal" segun documentacion de Express
+  app.set("trust proxy", process.env.TRUST_PROXY);
+}
+
 app.disable("x-powered-by");
 app.use(baseHelmet);
 app.use(
