@@ -116,7 +116,9 @@
     microsoftConfig: null,
     accounts: [],
     users: [],
-    runs: []
+    runs: [],
+    selectedAccountIds: new Set(),
+    queueRunning: false
   };
 
   const el = {
@@ -141,7 +143,11 @@
     msValidateBtn: document.getElementById("msValidateBtn"),
     usersList: document.getElementById("usersList"),
     usersCount: document.getElementById("usersCount"),
-    runsList: document.getElementById("runsList")
+    runsList: document.getElementById("runsList"),
+    accountSelectAllBtn: document.getElementById("accountSelectAllBtn"),
+    accountSelectNoneBtn: document.getElementById("accountSelectNoneBtn"),
+    accountQueueDryBtn: document.getElementById("accountQueueDryBtn"),
+    accountQueueMigrateBtn: document.getElementById("accountQueueMigrateBtn")
   };
 
   function normalize(value, max = 255) {
@@ -222,10 +228,29 @@
 
   function renderAccounts() {
     el.accountsList.replaceChildren();
-    el.accountsCount.textContent = `Total cuentas: ${state.accounts.length}`;
+    el.accountsCount.textContent = `Total cuentas: ${state.accounts.length} · Seleccionadas para cola: ${state.selectedAccountIds.size}`;
     for (const item of state.accounts) {
       const card = document.createElement("article");
       card.className = "item";
+
+      const selWrap = document.createElement("div");
+      selWrap.className = "row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.id = `sel-acc-${item.id}`;
+      cb.checked = state.selectedAccountIds.has(item.id);
+      cb.disabled = state.queueRunning;
+      cb.addEventListener("change", () => {
+        if (cb.checked) state.selectedAccountIds.add(item.id);
+        else state.selectedAccountIds.delete(item.id);
+        el.accountsCount.textContent = `Total cuentas: ${state.accounts.length} · Seleccionadas para cola: ${state.selectedAccountIds.size}`;
+      });
+      const lab = document.createElement("label");
+      lab.htmlFor = cb.id;
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(" Incluir en cola secuencial"));
+      selWrap.appendChild(lab);
+      card.appendChild(selWrap);
 
       const title = document.createElement("h3");
       title.textContent = `${item.provider} - ${item.sourceEmail}`;
@@ -501,6 +526,78 @@
     }
   }
 
+  function setQueueControlsDisabled(disabled) {
+    [el.accountSelectAllBtn, el.accountSelectNoneBtn, el.accountQueueDryBtn, el.accountQueueMigrateBtn].forEach((btn) => {
+      if (btn) btn.disabled = disabled;
+    });
+  }
+
+  async function waitForRunComplete(runId, dryRun) {
+    const maxWaitMs = dryRun ? 25 * 60 * 1000 : 8 * 60 * 60 * 1000;
+    const deadline = Date.now() + maxWaitMs;
+    let seen = false;
+    while (Date.now() < deadline) {
+      await loadRuns();
+      const row = state.runs.find((r) => r.id === runId);
+      if (row) {
+        seen = true;
+        if (row.status !== "running") {
+          return row;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    throw new Error(
+      seen
+        ? "Tiempo maximo esperando el fin de la ejecucion. Revisa Ejecuciones recientes."
+        : "No aparecio la ejecucion en el listado. Revisa backend y vuelve a intentar."
+    );
+  }
+
+  async function runMigrationQueue(dryRun) {
+    const ids = Array.from(state.selectedAccountIds);
+    if (!ids.length) {
+      setMessage("Selecciona al menos una cuenta (casilla En cola).", true);
+      return;
+    }
+    const accounts = ids
+      .map((id) => state.accounts.find((a) => a.id === id))
+      .filter(Boolean);
+    for (const a of accounts) {
+      if (a.provider === "microsoft" && !a.hasMicrosoftOauth) {
+        setMessage(`La cuenta ${a.sourceEmail} no tiene OAuth Microsoft. Conectala antes de usar la cola.`, true);
+        return;
+      }
+    }
+    state.queueRunning = true;
+    setQueueControlsDisabled(true);
+    renderAccounts();
+    try {
+      for (let i = 0; i < accounts.length; i += 1) {
+        const a = accounts[i];
+        setMessage(`Cola ${i + 1}/${accounts.length}: ${a.sourceEmail} (${dryRun ? "probar login" : "migrar"})…`);
+        const launched = await runMigration(a, dryRun);
+        if (!launched) {
+          setMessage(`Cola detenida: no se pudo iniciar ${a.sourceEmail}.`, true);
+          return;
+        }
+        const finished = await waitForRunComplete(launched.runId, dryRun);
+        if (finished.status === "failed") {
+          setMessage(`Fallo en ${a.sourceEmail}. Cola detenida. Revisa el detalle en Ejecuciones recientes.`, true);
+          return;
+        }
+      }
+      setMessage(`Cola terminada: ${accounts.length} cuenta(s).`);
+      await loadRuns();
+    } catch (err) {
+      setMessage(err.message || "Error en la cola de migracion.", true);
+    } finally {
+      state.queueRunning = false;
+      setQueueControlsDisabled(false);
+      renderAccounts();
+    }
+  }
+
   async function waitForMicrosoftOAuthConnection(accountId, timeoutMs = 120000, intervalMs = 2000) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
@@ -526,7 +623,7 @@
     const isMicrosoft = account.provider === "microsoft";
     if (isMicrosoft && !account.hasMicrosoftOauth) {
       setMessage("Esta cuenta Microsoft no esta conectada por OAuth2. Pulsa primero 'Conectar OAuth2'.", true);
-      return;
+      return null;
     }
     const storedToken = isMicrosoft ? normalize(state.oauthTokensByAccount[account.id] || "", 10000) : "";
     const sourceToken = isMicrosoft ? storedToken : "";
@@ -537,15 +634,15 @@
 
     if (!account.hasDestinationSecret && !destinationPassword) {
       setMessage("La contraseña de destino es requerida.", true);
-      return;
+      return null;
     }
     if (!isMicrosoft && !sourcePassword) {
       setMessage("La contraseña de origen es requerida.", true);
-      return;
+      return null;
     }
 
     try {
-      await api("/jobs/run", {
+      const data = await api("/jobs/run", {
         method: "POST",
         body: {
           mailAccountId: account.id,
@@ -557,6 +654,7 @@
       });
       setMessage(dryRun ? "Prueba de login lanzada." : "Migración lanzada.");
       await loadRuns();
+      return data?.runId ? { runId: data.runId } : null;
     } catch (err) {
       setMessage(err.message || "No se pudo crear la ejecucion.", true);
       throw err;
@@ -663,6 +761,36 @@
       setMessage(err.message, true);
     }
   });
+
+  if (el.accountSelectAllBtn) {
+    el.accountSelectAllBtn.addEventListener("click", () => {
+      if (state.queueRunning) return;
+      state.accounts.forEach((a) => state.selectedAccountIds.add(a.id));
+      renderAccounts();
+      setMessage(`${state.selectedAccountIds.size} cuenta(s) seleccionadas para cola.`);
+    });
+  }
+
+  if (el.accountSelectNoneBtn) {
+    el.accountSelectNoneBtn.addEventListener("click", () => {
+      if (state.queueRunning) return;
+      state.selectedAccountIds.clear();
+      renderAccounts();
+      setMessage("Seleccion de cola vaciada.");
+    });
+  }
+
+  if (el.accountQueueDryBtn) {
+    el.accountQueueDryBtn.addEventListener("click", () => {
+      void runMigrationQueue(true);
+    });
+  }
+
+  if (el.accountQueueMigrateBtn) {
+    el.accountQueueMigrateBtn.addEventListener("click", () => {
+      void runMigrationQueue(false);
+    });
+  }
 
   if (el.refreshRunsBtn) {
     el.refreshRunsBtn.addEventListener("click", async () => {

@@ -82,6 +82,15 @@
             <button id="refreshBtn" class="secondary">Actualizar</button>
           </div>
           <p class="hint">Para Microsoft usa primero "Conectar OAuth2". Luego ejecuta "Probar login" o "Migrar ahora".</p>
+          <p class="hint">
+            Cola secuencial: marca cuentas y ejecuta una tras otra (espera a que termine cada job antes del siguiente).
+          </p>
+          <div class="row" style="flex-wrap: wrap; gap: 0.5rem; margin-bottom: 10px">
+            <button type="button" id="accountSelectAllBtn" class="secondary">Seleccionar todas</button>
+            <button type="button" id="accountSelectNoneBtn" class="secondary">Quitar seleccion</button>
+            <button type="button" id="accountQueueDryBtn" class="secondary">Probar login en cola</button>
+            <button type="button" id="accountQueueMigrateBtn" class="secondary">Migrar en cola</button>
+          </div>
           <p id="accountsCount" class="hint"></p>
           <div id="accountsList" class="list"></div>
         </div>
