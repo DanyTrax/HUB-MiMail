@@ -275,6 +275,14 @@
               setMessage(
                 "Completa el login en la ventana o pestaña que se abrio. Si fue pestaña, es normal en algunos navegadores; al terminar, vuelve aqui y deberia actualizarse el estado."
               );
+              void waitForMicrosoftOAuthConnection(item.id).then((ok) => {
+                if (!ok) {
+                  setMessage(
+                    "OAuth aun no aparece conectado. Pulsa 'Actualizar' en Cuentas registradas o repite Conectar OAuth2.",
+                    true
+                  );
+                }
+              });
             } catch (err) {
               try {
                 popup.close();
@@ -491,6 +499,27 @@
     if (el.oauthForm) {
       fillMicrosoftConfigForm(state.microsoftConfig);
     }
+  }
+
+  async function waitForMicrosoftOAuthConnection(accountId, timeoutMs = 120000, intervalMs = 2000) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const result = await api("/mail-accounts");
+        const items = Array.isArray(result?.items) ? result.items : [];
+        state.accounts = items;
+        const current = items.find((it) => it.id === accountId);
+        renderAccounts();
+        if (current?.hasMicrosoftOauth) {
+          setMessage("Cuenta Microsoft conectada correctamente.");
+          return true;
+        }
+      } catch (_err) {
+        // Ignora fallas transitorias de red durante la espera.
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    return false;
   }
 
   async function runMigration(account, dryRun) {
