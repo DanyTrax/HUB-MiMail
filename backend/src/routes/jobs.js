@@ -264,6 +264,12 @@ async function runImapsync({ account, sourceToken, sourcePassword, destinationPa
       proc.on("close", async (code) => {
         const status = code === 0 ? "success" : "failed";
         const summary = code === 0 ? "imapsync completado" : `imapsync finalizo con error (${code})`;
+        logJobs("run-finished", {
+          runId,
+          status,
+          exitCode: code,
+          stderrTail: stderrBuffer.slice(-500)
+        });
         await db.query(
           `UPDATE job_runs
            SET finished_at = NOW(), status = $2::job_status, summary = $3, details = $4::jsonb
