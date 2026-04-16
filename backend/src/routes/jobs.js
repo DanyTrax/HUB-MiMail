@@ -2,7 +2,7 @@ const express = require("express");
 const os = require("os");
 const path = require("path");
 const fs = require("fs/promises");
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const db = require("../db");
 const { microsoftOAuth } = require("../config");
 const { requireAuth } = require("../middleware/auth");
@@ -13,6 +13,25 @@ const router = express.Router();
 const MICROSOFT_SCOPE = "offline_access https://outlook.office.com/IMAP.AccessAsUser.All";
 
 router.use(requireAuth);
+
+function logJobs(event, data = {}) {
+  // eslint-disable-next-line no-console
+  console.log(`[jobs] ${event}`, data);
+}
+
+function checkImapsyncAvailable() {
+  try {
+    const probe = spawnSync("imapsync", ["--version"], { encoding: "utf8" });
+    return {
+      ok: probe.status === 0,
+      status: probe.status,
+      error: probe.error ? probe.error.message : null,
+      stderr: (probe.stderr || "").trim().slice(0, 300)
+    };
+  } catch (err) {
+    return { ok: false, status: null, error: err.message, stderr: "" };
+  }
+}
 
 function parseCredentialSecret(rawValue) {
   if (!rawValue) return null;
@@ -278,6 +297,12 @@ router.post("/run", requireRole(["superadmin", "company_admin", "operator"]), as
   const sourcePassword = safeTextOrNull(req.body?.sourcePassword, 256);
   const destinationPasswordInput = safeTextOrNull(req.body?.destinationPassword, 256);
   const dryRun = Boolean(req.body?.dryRun);
+  logJobs("run-request", {
+    companyId: req.user.companyId,
+    userId: req.user.sub,
+    mailAccountId,
+    dryRun
+  });
 
   if (!mailAccountId) {
     return res.status(400).json({ error: "mailAccountId es requerido" });
@@ -306,6 +331,15 @@ router.post("/run", requireRole(["superadmin", "company_admin", "operator"]), as
   }
   if (account.provider !== "microsoft" && !sourceTokenInput && !sourcePassword) {
     return res.status(400).json({ error: "Debes enviar sourceToken o sourcePassword" });
+  }
+
+  const imapsyncProbe = checkImapsyncAvailable();
+  if (!imapsyncProbe.ok) {
+    logJobs("imapsync-unavailable", imapsyncProbe);
+    return res.status(503).json({
+      error:
+        "imapsync no esta instalado o no es ejecutable en el contenedor backend. Contacta al administrador para habilitar el ejecutor de migraciones."
+    });
   }
 
   let sourceToken = sourceTokenInput;
@@ -355,6 +389,11 @@ router.post("/run", requireRole(["superadmin", "company_admin", "operator"]), as
   const runId = runResult.rows[0].id;
 
   runImapsync({ account, sourceToken, sourcePassword, destinationPassword, dryRun, runId }).catch(async (err) => {
+    logJobs("run-dispatch-error", {
+      runId,
+      companyId: req.user.companyId,
+      error: err.message
+    });
     await db.query(
       `UPDATE job_runs
        SET finished_at = NOW(), status = 'failed', summary = 'Fallo interno al lanzar imapsync', details = $2::jsonb
