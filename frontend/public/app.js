@@ -49,17 +49,37 @@
     return base;
   }
 
-  function expectedOAuthPopupOrigin() {
+  /**
+   * Origen del documento del callback OAuth (mismo host que redirect_uri en Azure).
+   * El popup abre en la API (p.ej. sqlbackmails...), no en el panel (hubmails...).
+   */
+  function microsoftOAuthCallbackOrigin() {
+    const ru = state.microsoftConfig?.redirectUri;
+    if (ru) {
+      try {
+        return new URL(ru).origin;
+      } catch (_err) {
+        return null;
+      }
+    }
     try {
       const u = new URL(state.apiBase);
-      const path = u.pathname.replace(/\/$/, "") || "/";
-      if (path === "/api" || path.endsWith("/api")) {
-        return `${u.protocol}//${u.hostname}:4000`;
-      }
       return u.origin;
     } catch (_err) {
-      return `${window.location.protocol}//${window.location.hostname}:4000`;
+      return window.location.origin;
     }
+  }
+
+  function isAllowedMicrosoftOAuthMessage(event) {
+    const callbackOrigin = microsoftOAuthCallbackOrigin();
+    if (callbackOrigin && event.origin === callbackOrigin) {
+      return true;
+    }
+    // Mismo host que el panel (callback bajo mismo origen que /api)
+    if (event.origin === window.location.origin) {
+      return true;
+    }
+    return false;
   }
 
   function defaultMicrosoftRedirectUri() {
@@ -209,6 +229,14 @@
         connectBtn.textContent = state.oauthTokensByAccount[item.id] ? "Actualizar OAuth2" : "Conectar OAuth2";
         connectBtn.addEventListener("click", async () => {
           try {
+            await loadMicrosoftConfig();
+            if (!state.microsoftConfig?.redirectUri) {
+              setMessage(
+                "Falta Redirect URI en Configuracion Microsoft; el panel no puede validar el mensaje del popup.",
+                true
+              );
+              return;
+            }
             const result = await api("/auth/microsoft/connect-url", {
               method: "POST",
               body: { mailAccountId: item.id, frontendOrigin: window.location.origin }
@@ -427,10 +455,12 @@
   }
 
   async function loadMicrosoftConfig() {
-    if (!state.user || !["superadmin", "company_admin"].includes(state.user.role) || !el.oauthForm) return;
+    if (!state.user || !["superadmin", "company_admin"].includes(state.user.role)) return;
     const result = await api("/oauth-configs/microsoft");
     state.microsoftConfig = result?.item || null;
-    fillMicrosoftConfigForm(state.microsoftConfig);
+    if (el.oauthForm) {
+      fillMicrosoftConfigForm(state.microsoftConfig);
+    }
   }
 
   async function runMigration(account, dryRun) {
@@ -652,13 +682,14 @@
   }
 
   window.addEventListener("message", (event) => {
-    const allowedOrigin = expectedOAuthPopupOrigin();
-    if (!allowedOrigin || event.origin !== allowedOrigin) return;
+    if (!isAllowedMicrosoftOAuthMessage(event)) return;
     const data = event.data || {};
     if (data.type === "microsoft-oauth-success" && data.accountId && data.accessToken) {
       saveOauthToken(data.accountId, normalize(data.accessToken, 10000));
       setMessage("Cuenta Microsoft conectada. Token OAuth2 listo para migracion.");
-      renderAccounts();
+      loadAccounts().catch(() => {
+        renderAccounts();
+      });
       return;
     }
     if (data.type === "microsoft-oauth-error") {

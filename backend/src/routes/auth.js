@@ -15,10 +15,19 @@ function toBase64Url(value) {
   return value.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
+function postMessageTargetOrigin(raw) {
+  if (!raw || raw === "*") return "*";
+  try {
+    return new URL(raw).origin;
+  } catch (_err) {
+    return "*";
+  }
+}
+
 function createMicrosoftPopupResponse({ ok, message, payload, targetOrigin }) {
   const escapedMessage = JSON.stringify(message || "");
   const serializedPayload = JSON.stringify(payload || {});
-  const safeTargetOrigin = JSON.stringify(targetOrigin || "*");
+  const safeTargetOrigin = JSON.stringify(postMessageTargetOrigin(targetOrigin));
   const type = ok ? "microsoft-oauth-success" : "microsoft-oauth-error";
   return `<!doctype html>
 <html lang="es">
@@ -151,13 +160,19 @@ router.post("/microsoft/connect-url", requireAuth, async (req, res) => {
   }
 
   const companyMicrosoftConfig = await getCompanyMicrosoftConfig(req.user.companyId);
-  const resolvedConfig = companyMicrosoftConfig || {
-    clientId: microsoftOAuth.clientId,
-    clientSecret: microsoftOAuth.clientSecret,
-    tenantId: microsoftOAuth.tenantId,
-    redirectUri: microsoftOAuth.redirectUri,
-    frontendOrigin: frontendOriginInput || null
-  };
+  const resolvedConfig = companyMicrosoftConfig
+    ? {
+        ...companyMicrosoftConfig,
+        // Origen del panel actual (postMessage); prioridad sobre valor viejo en BD.
+        ...(frontendOriginInput ? { frontendOrigin: frontendOriginInput } : {})
+      }
+    : {
+        clientId: microsoftOAuth.clientId,
+        clientSecret: microsoftOAuth.clientSecret,
+        tenantId: microsoftOAuth.tenantId,
+        redirectUri: microsoftOAuth.redirectUri,
+        frontendOrigin: frontendOriginInput || null
+      };
   if (!resolvedConfig.clientId || !resolvedConfig.redirectUri) {
     return res.status(400).json({
       error: "Microsoft OAuth2 no configurado para esta empresa. Ve a Configuracion Microsoft."
