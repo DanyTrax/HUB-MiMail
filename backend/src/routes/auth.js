@@ -11,6 +11,11 @@ const router = express.Router();
 const pendingMicrosoftAuth = new Map();
 const MICROSOFT_SCOPE = "offline_access https://outlook.office.com/IMAP.AccessAsUser.All";
 
+function logMicrosoftOAuth(event, data = {}) {
+  // eslint-disable-next-line no-console
+  console.log(`[oauth:microsoft] ${event}`, data);
+}
+
 function toBase64Url(value) {
   return value.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
@@ -191,6 +196,15 @@ router.post("/microsoft/connect-url", requireAuth, async (req, res) => {
     createdAt: Date.now(),
     oauthConfig: resolvedConfig
   });
+  logMicrosoftOAuth("connect-url-issued", {
+    companyId: req.user.companyId,
+    userId: req.user.sub,
+    mailAccountId,
+    tenantId: resolvedConfig.tenantId || "common",
+    redirectUri: resolvedConfig.redirectUri,
+    frontendOrigin: resolvedConfig.frontendOrigin || null,
+    pendingCount: pendingMicrosoftAuth.size
+  });
 
   const authorizeUrl = new URL(
     `https://login.microsoftonline.com/${encodeURIComponent(resolvedConfig.tenantId || "common")}/oauth2/v2.0/authorize`
@@ -213,8 +227,17 @@ router.get("/microsoft/callback", async (req, res) => {
   const code = safeTextOrNull(req.query?.code, 4000);
   const oauthError = safeTextOrNull(req.query?.error, 200);
   const oauthErrorDescription = safeTextOrNull(req.query?.error_description, 800);
+  logMicrosoftOAuth("callback-received", {
+    hasState: Boolean(state),
+    hasCode: Boolean(code),
+    oauthError: oauthError || null
+  });
 
   if (oauthError) {
+    logMicrosoftOAuth("callback-oauth-error", {
+      oauthError,
+      oauthErrorDescription: oauthErrorDescription || null
+    });
     return res
       .status(400)
       .type("html")
@@ -237,6 +260,10 @@ router.get("/microsoft/callback", async (req, res) => {
   const pending = pendingMicrosoftAuth.get(state);
   pendingMicrosoftAuth.delete(state);
   if (!pending || Date.now() - pending.createdAt > 10 * 60 * 1000) {
+    logMicrosoftOAuth("callback-state-miss-or-expired", {
+      statePreview: String(state).slice(0, 10),
+      pendingFound: Boolean(pending)
+    });
     return res
       .status(400)
       .type("html")
@@ -267,6 +294,13 @@ router.get("/microsoft/callback", async (req, res) => {
     tokenData = await tokenResponse.json().catch(() => ({}));
     if (!tokenResponse.ok || !tokenData?.access_token) {
       const detail = tokenData?.error_description || tokenData?.error || "No se obtuvo access_token";
+      logMicrosoftOAuth("token-exchange-failed", {
+        companyId: pending.companyId,
+        mailAccountId: pending.mailAccountId,
+        tenantId: oauthConfig.tenantId || "common",
+        status: tokenResponse.status,
+        detail
+      });
       return res
         .status(400)
         .type("html")
@@ -279,6 +313,11 @@ router.get("/microsoft/callback", async (req, res) => {
         );
     }
   } catch (err) {
+    logMicrosoftOAuth("token-exchange-error", {
+      companyId: pending.companyId,
+      mailAccountId: pending.mailAccountId,
+      error: err.message
+    });
     return res
       .status(500)
       .type("html")
@@ -318,6 +357,11 @@ router.get("/microsoft/callback", async (req, res) => {
       [pending.companyId, pending.mailAccountId, "microsoft", secretCiphertext]
     );
   }
+  logMicrosoftOAuth("credential-saved", {
+    companyId: pending.companyId,
+    mailAccountId: pending.mailAccountId,
+    mode: updateCredential.rowCount ? "update" : "insert"
+  });
 
   await db.query(
     `UPDATE mail_accounts
