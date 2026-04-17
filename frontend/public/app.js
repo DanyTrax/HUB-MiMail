@@ -118,6 +118,7 @@
     accounts: [],
     users: [],
     runs: [],
+    selectedUserCompanyId: null,
     selectedAccountIds: new Set(),
     queueRunning: false
   };
@@ -153,7 +154,9 @@
     companiesList: document.getElementById("companiesList"),
     companiesCount: document.getElementById("companiesCount"),
     refreshCompaniesBtn: document.getElementById("refreshCompaniesBtn"),
-    companyForm: document.getElementById("companyForm")
+    companyForm: document.getElementById("companyForm"),
+    userCompanySelectorWrap: document.getElementById("userCompanySelectorWrap"),
+    userCompanySelect: document.getElementById("userCompanySelect")
   };
 
   function normalize(value, max = 255) {
@@ -473,9 +476,13 @@
       saveBtn.textContent = "Cambiar rol";
       saveBtn.addEventListener("click", async () => {
         try {
+          const body = { role: normalize(roleSelect.value, 30) };
+          if (state.user?.role === "superadmin" && state.selectedUserCompanyId) {
+            body.companyId = state.selectedUserCompanyId;
+          }
           await api(`/users/${user.id}/role`, {
             method: "PATCH",
-            body: { role: normalize(roleSelect.value, 30) }
+            body
           });
           setMessage("Rol actualizado.");
           await loadUsers();
@@ -502,7 +509,11 @@
 
   async function loadUsers() {
     if (!state.user || !["superadmin", "company_admin"].includes(state.user.role)) return;
-    const result = await api("/users");
+    let path = "/users";
+    if (state.user.role === "superadmin" && state.selectedUserCompanyId) {
+      path = `/users?companyId=${encodeURIComponent(state.selectedUserCompanyId)}`;
+    }
+    const result = await api(path);
     state.users = Array.isArray(result?.items) ? result.items : [];
     renderUsers();
   }
@@ -544,6 +555,20 @@
       card.appendChild(createTextLine("Activa", String(c.isActive)));
       card.appendChild(createTextLine("Id", c.id));
       el.companiesList.appendChild(card);
+    }
+    if (el.userCompanySelect) {
+      const prev = state.selectedUserCompanyId;
+      el.userCompanySelect.replaceChildren();
+      for (const c of state.companies) {
+        const op = document.createElement("option");
+        op.value = c.id;
+        op.textContent = `${c.name} (${c.slug})`;
+        if (prev ? prev === c.id : state.user?.companyId === c.id) {
+          op.selected = true;
+        }
+        el.userCompanySelect.appendChild(op);
+      }
+      state.selectedUserCompanyId = el.userCompanySelect.value || null;
     }
   }
 
@@ -713,12 +738,16 @@
       if (el.companiesSection) {
         el.companiesSection.classList.toggle("hidden", state.user.role !== "superadmin");
       }
+      if (el.userCompanySelectorWrap) {
+        el.userCompanySelectorWrap.classList.toggle("hidden", state.user.role !== "superadmin");
+      }
       renderSession();
       await loadAccounts();
       await loadUsers();
       await loadMicrosoftConfig();
       if (state.user.role === "superadmin") {
         await loadCompanies();
+        await loadUsers();
       }
       await loadRuns();
     } catch (_err) {
@@ -760,11 +789,15 @@
       if (el.companiesSection) {
         el.companiesSection.classList.toggle("hidden", result.user.role !== "superadmin");
       }
+      if (el.userCompanySelectorWrap) {
+        el.userCompanySelectorWrap.classList.toggle("hidden", result.user.role !== "superadmin");
+      }
       await loadAccounts();
       await loadUsers();
       await loadMicrosoftConfig();
       if (result.user.role === "superadmin") {
         await loadCompanies();
+        await loadUsers();
       }
       await loadRuns();
       setMessage("Sesión iniciada correctamente.");
@@ -882,23 +915,17 @@
     el.companyForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       setMessage("");
-      const adminPassword = normalize(document.getElementById("coAdminPassword").value, 256);
       const slugRaw = normalize(document.getElementById("coSlug").value, 120)
         .toLowerCase()
         .replace(/\s+/g, "-")
         .replace(/-+/g, "-");
       const body = {
         name: normalize(document.getElementById("coName").value, 160),
-        slug: slugRaw,
-        adminEmail: normalize(document.getElementById("coAdminEmail").value, 190).toLowerCase(),
-        adminFullName: normalize(document.getElementById("coAdminFullName").value, 160)
+        slug: slugRaw
       };
-      if (adminPassword) {
-        body.adminPassword = adminPassword;
-      }
       try {
         await api("/companies", { method: "POST", body });
-        setMessage("Empresa creada. El admin puede entrar con su email + slug de empresa.");
+        setMessage("Empresa creada. El superadmin actual ya tiene acceso a ella.");
         el.companyForm.reset();
         await loadCompanies();
       } catch (err) {
@@ -914,14 +941,30 @@
       const body = {
         email: normalize(document.getElementById("userEmail").value, 190).toLowerCase(),
         fullName: normalize(document.getElementById("userFullName").value, 160),
-        password: normalize(document.getElementById("userPassword").value, 256),
         role: normalize(document.getElementById("userRole").value, 30)
       };
+      const maybePassword = normalize(document.getElementById("userPassword").value, 256);
+      if (maybePassword) body.password = maybePassword;
+      if (state.user?.role === "superadmin" && state.selectedUserCompanyId) {
+        body.companyId = state.selectedUserCompanyId;
+      }
       try {
         await api("/users", { method: "POST", body });
         setMessage("Usuario creado/actualizado.");
         el.userForm.reset();
         await loadUsers();
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+  }
+
+  if (el.userCompanySelect) {
+    el.userCompanySelect.addEventListener("change", async () => {
+      state.selectedUserCompanyId = el.userCompanySelect.value || null;
+      try {
+        await loadUsers();
+        setMessage("Usuarios actualizados para la empresa seleccionada.");
       } catch (err) {
         setMessage(err.message, true);
       }
@@ -1008,6 +1051,7 @@
     if (el.runsList) el.runsList.replaceChildren();
     if (el.oauthSection) el.oauthSection.classList.add("hidden");
     if (el.companiesSection) el.companiesSection.classList.add("hidden");
+    if (el.userCompanySelectorWrap) el.userCompanySelectorWrap.classList.add("hidden");
     setMessage("Sesión cerrada.");
   });
 

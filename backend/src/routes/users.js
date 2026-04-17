@@ -11,7 +11,21 @@ const ALLOWED_ROLES = ["superadmin", "company_admin", "operator", "scheduler", "
 router.use(requireAuth);
 router.use(requireRole(["superadmin", "company_admin"]));
 
+async function resolveTargetCompanyId(req) {
+  const requestedCompanyId = safeTextOrNull(req.body?.companyId || req.query?.companyId, 36);
+  if (!requestedCompanyId) return req.user.companyId;
+  if (req.user.role !== "superadmin") {
+    return null;
+  }
+  const exists = await db.query("SELECT id FROM companies WHERE id = $1 LIMIT 1", [requestedCompanyId]);
+  return exists.rows.length ? requestedCompanyId : null;
+}
+
 router.get("/", async (req, res) => {
+  const companyId = await resolveTargetCompanyId(req);
+  if (!companyId) {
+    return res.status(400).json({ error: "companyId invalido o no autorizado" });
+  }
   const query = `
     SELECT
       u.id,
@@ -19,30 +33,32 @@ router.get("/", async (req, res) => {
       u.full_name AS "fullName",
       u.is_active AS "isActive",
       m.role::text AS role,
+      m.company_id AS "companyId",
       u.created_at AS "createdAt"
     FROM memberships m
     INNER JOIN users u ON u.id = m.user_id
     WHERE m.company_id = $1
     ORDER BY u.created_at DESC
   `;
-  const { rows } = await db.query(query, [req.user.companyId]);
+  const { rows } = await db.query(query, [companyId]);
   return res.json({ items: rows });
 });
 
 router.post("/", async (req, res) => {
+  const companyId = await resolveTargetCompanyId(req);
+  if (!companyId) {
+    return res.status(400).json({ error: "companyId invalido o no autorizado" });
+  }
   const email = normalizeEmailOrNull(req.body?.email);
   const fullName = safeTextOrNull(req.body?.fullName, 160);
   const password = safeTextOrNull(req.body?.password, 256);
   const role = safeTextOrNull(req.body?.role, 30);
 
-  if (!email || !fullName || !password || !role) {
-    return res.status(400).json({ error: "email, fullName, password y role son requeridos" });
+  if (!email || !fullName || !role) {
+    return res.status(400).json({ error: "email, fullName y role son requeridos" });
   }
   if (!ALLOWED_ROLES.includes(role)) {
     return res.status(400).json({ error: "role invalido" });
-  }
-  if (password.length < 8) {
-    return res.status(400).json({ error: "password debe tener al menos 8 caracteres" });
   }
 
   const existing = await db.query("SELECT id FROM users WHERE email = $1 LIMIT 1", [email]);
@@ -55,6 +71,9 @@ router.post("/", async (req, res) => {
       [userId, fullName]
     );
   } else {
+    if (!password || password.length < 8) {
+      return res.status(400).json({ error: "password debe tener al menos 8 caracteres para usuario nuevo" });
+    }
     const hash = await bcrypt.hash(password, 12);
     const inserted = await db.query(
       `INSERT INTO users (email, password_hash, full_name)
@@ -70,7 +89,7 @@ router.post("/", async (req, res) => {
      VALUES ($1, $2, $3::app_role)
      ON CONFLICT (company_id, user_id)
      DO UPDATE SET role = EXCLUDED.role`,
-    [req.user.companyId, userId, role]
+    [companyId, userId, role]
   );
 
   const result = await db.query(
@@ -80,16 +99,21 @@ router.post("/", async (req, res) => {
       u.full_name AS "fullName",
       u.is_active AS "isActive",
       m.role::text AS role,
+      m.company_id AS "companyId",
       u.created_at AS "createdAt"
      FROM memberships m
      INNER JOIN users u ON u.id = m.user_id
      WHERE m.company_id = $1 AND m.user_id = $2`,
-    [req.user.companyId, userId]
+    [companyId, userId]
   );
   return res.status(201).json(result.rows[0]);
 });
 
 router.patch("/:id/role", async (req, res) => {
+  const companyId = await resolveTargetCompanyId(req);
+  if (!companyId) {
+    return res.status(400).json({ error: "companyId invalido o no autorizado" });
+  }
   const userId = safeTextOrNull(req.params.id, 36);
   const role = safeTextOrNull(req.body?.role, 30);
 
@@ -101,7 +125,7 @@ router.patch("/:id/role", async (req, res) => {
      SET role = $3::app_role
      WHERE company_id = $1 AND user_id = $2
      RETURNING user_id`,
-    [req.user.companyId, userId, role]
+    [companyId, userId, role]
   );
   if (!updated.rows.length) return res.status(404).json({ error: "Usuario no encontrado en esta empresa" });
 

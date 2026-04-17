@@ -48,8 +48,8 @@
         <div id="companiesSection" class="card hidden">
           <h2>Empresas</h2>
           <p class="hint">
-            Solo visible para <code>superadmin</code>. Crea una empresa nueva y asigna un administrador
-            (<code>company_admin</code>) en esa empresa. El slug es el que usan en el login junto al email.
+            Solo visible para <code>superadmin</code>. Crea una empresa nueva. El usuario superadmin actual queda
+            vinculado automaticamente a la empresa creada. El slug es el que usan en el login junto al email.
           </p>
           <div class="row between">
             <span id="companiesCount" class="hint"></span>
@@ -65,22 +65,6 @@
               Slug (empresa en login)
               <input id="coSlug" type="text" required placeholder="ej: acme-corp" />
             </label>
-            <label>
-              Email administrador
-              <input id="coAdminEmail" type="email" required autocomplete="username" />
-            </label>
-            <label>
-              Nombre completo administrador
-              <input id="coAdminFullName" type="text" required />
-            </label>
-            <label>
-              Contraseña administrador
-              <input id="coAdminPassword" type="password" autocomplete="new-password" />
-            </label>
-            <p class="hint">
-              Si el email ya existe como usuario, no hace falta contraseña: solo se vincula como admin a la nueva
-              empresa (usa su contraseña actual para entrar).
-            </p>
             <button type="submit">Crear empresa</button>
           </form>
         </div>
@@ -148,6 +132,11 @@
             <h2>Usuarios de la empresa</h2>
             <button id="refreshUsersBtn" class="secondary">Actualizar</button>
           </div>
+          <label id="userCompanySelectorWrap" class="hidden">
+            Empresa objetivo (solo superadmin)
+            <select id="userCompanySelect"></select>
+          </label>
+          <p class="hint">Desde aqui puedes crear/asignar usuarios y roles a la empresa seleccionada.</p>
           <form id="userForm" class="form grid">
             <label>
               Email
@@ -159,7 +148,7 @@
             </label>
             <label>
               Contraseña
-              <input id="userPassword" type="password" required />
+              <input id="userPassword" type="password" />
             </label>
             <label>
               Rol
@@ -170,7 +159,7 @@
                 <option value="viewer">viewer</option>
               </select>
             </label>
-            <button type="submit">Crear usuario</button>
+            <button type="submit">Crear/asignar usuario</button>
           </form>
           <p id="usersCount" class="hint"></p>
           <div id="usersList" class="list"></div>
