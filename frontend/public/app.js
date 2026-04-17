@@ -155,6 +155,7 @@
     companiesCount: document.getElementById("companiesCount"),
     refreshCompaniesBtn: document.getElementById("refreshCompaniesBtn"),
     companyForm: document.getElementById("companyForm"),
+    companySubmitBtn: document.getElementById("companySubmitBtn"),
     userCompanySelectorWrap: document.getElementById("userCompanySelectorWrap"),
     userCompanySelect: document.getElementById("userCompanySelect")
   };
@@ -164,9 +165,14 @@
     return value.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, max);
   }
 
-  function setMessage(message, isError = false) {
+  function setMessage(message, isError = false, opts = {}) {
     el.message.textContent = message || "";
     el.message.style.color = isError ? "#fca5a5" : "#fcd34d";
+    if (message && el.message && opts.scrollToMessage) {
+      requestAnimationFrame(() => {
+        el.message.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    }
   }
 
   function setAuth(token, user) {
@@ -915,21 +921,49 @@
     el.companyForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       setMessage("");
+      const name = normalize(document.getElementById("coName").value, 160);
       const slugRaw = normalize(document.getElementById("coSlug").value, 120)
         .toLowerCase()
         .replace(/\s+/g, "-")
-        .replace(/-+/g, "-");
-      const body = {
-        name: normalize(document.getElementById("coName").value, 160),
-        slug: slugRaw
-      };
+        .replace(/-+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      if (!name || !slugRaw) {
+        setMessage("Nombre y slug son obligatorios. El slug: solo minusculas, numeros y guiones.", true, {
+          scrollToMessage: true
+        });
+        return;
+      }
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slugRaw)) {
+        setMessage(
+          "Slug invalido: usa solo letras minusculas, numeros y guiones (ej: ad-publicidad, visualad). Sin espacios ni guiones al inicio o al final.",
+          true,
+          { scrollToMessage: true }
+        );
+        return;
+      }
+      const body = { name, slug: slugRaw };
+      const submitBtn = el.companySubmitBtn;
+      const prevLabel = submitBtn ? submitBtn.textContent : "";
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creando…";
+      }
       try {
         await api("/companies", { method: "POST", body });
-        setMessage("Empresa creada. El superadmin actual ya tiene acceso a ella.");
+        setMessage(
+          "Empresa creada. Las demas empresas y sus datos no se modifican. El superadmin actual ya tiene acceso a la nueva.",
+          false,
+          { scrollToMessage: true }
+        );
         el.companyForm.reset();
         await loadCompanies();
       } catch (err) {
-        setMessage(err.message, true);
+        setMessage(err.message, true, { scrollToMessage: true });
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = prevLabel || "Crear empresa";
+        }
       }
     });
   }

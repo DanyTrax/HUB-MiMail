@@ -48,8 +48,9 @@
         <div id="companiesSection" class="card hidden">
           <h2>Empresas</h2>
           <p class="hint">
-            Solo visible para <code>superadmin</code>. Crea una empresa nueva. El usuario superadmin actual queda
-            vinculado automaticamente a la empresa creada. El slug es el que usan en el login junto al email.
+            Solo visible para <code>superadmin</code>. Crea una empresa nueva (no borra ni modifica las demas). El
+            usuario superadmin actual queda vinculado tambien a la empresa nueva. El slug es el que usan en el login
+            junto al email.
           </p>
           <div class="row between">
             <span id="companiesCount" class="hint"></span>
@@ -65,7 +66,7 @@
               Slug (empresa en login)
               <input id="coSlug" type="text" required placeholder="ej: acme-corp" />
             </label>
-            <button type="submit">Crear empresa</button>
+            <button type="submit" id="companySubmitBtn">Crear empresa</button>
           </form>
         </div>
 
