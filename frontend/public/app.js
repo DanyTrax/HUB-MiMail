@@ -120,6 +120,8 @@
     runs: [],
     runsPage: 1,
     runsMeta: { total: 0, totalPages: 1, limit: 4 },
+    /** ids de job_runs con el bloque Detalle expandido (persiste al refrescar la lista por polling) */
+    runsDetailExpandedIds: new Set(),
     selectedUserCompanyId: null,
     selectedAccountIds: new Set(),
     queueRunning: false
@@ -517,15 +519,20 @@
         const pre = document.createElement("pre");
         pre.className = "pre run-detail-pre";
         pre.textContent = detailText;
-        pre.hidden = true;
+        const expanded = run.id && state.runsDetailExpandedIds.has(run.id);
+        pre.hidden = !expanded;
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "secondary run-detail-toggle";
-        toggle.textContent = "Ver más";
+        toggle.textContent = expanded ? "Ver menos" : "Ver más";
         toggle.addEventListener("click", () => {
-          const open = pre.hidden;
-          pre.hidden = !open;
-          toggle.textContent = open ? "Ver menos" : "Ver más";
+          const willShow = pre.hidden;
+          pre.hidden = !willShow;
+          if (run.id) {
+            if (willShow) state.runsDetailExpandedIds.add(run.id);
+            else state.runsDetailExpandedIds.delete(run.id);
+          }
+          toggle.textContent = willShow ? "Ver menos" : "Ver más";
         });
         wrap.appendChild(detLabel);
         wrap.appendChild(toggle);
@@ -610,6 +617,10 @@
   async function loadRuns() {
     const result = await api(`/jobs/runs?page=${encodeURIComponent(String(state.runsPage))}&limit=4`);
     state.runs = Array.isArray(result?.items) ? result.items : [];
+    const visibleRunIds = new Set(state.runs.map((r) => r.id).filter(Boolean));
+    for (const id of [...state.runsDetailExpandedIds]) {
+      if (!visibleRunIds.has(id)) state.runsDetailExpandedIds.delete(id);
+    }
     const total = Number(result?.total) || 0;
     const limit = Number(result?.limit) || 4;
     const totalPages = Math.max(1, Number(result?.totalPages) || 1);
@@ -1180,6 +1191,7 @@
     if (el.runsList) el.runsList.replaceChildren();
     state.runsPage = 1;
     state.runsMeta = { total: 0, totalPages: 1, limit: 4 };
+    state.runsDetailExpandedIds.clear();
     if (el.runsPagination) {
       el.runsPagination.replaceChildren();
       el.runsPagination.classList.add("hidden");
