@@ -8,6 +8,7 @@ const { microsoftOAuth } = require("../config");
 const { requireAuth } = require("../middleware/auth");
 const { requireRole } = require("../middleware/rbac");
 const { safeTextOrNull } = require("../utils/input");
+const { imapsyncFailureSummary, describeImapsyncExitCode } = require("../utils/imapsyncExitCodes");
 
 const router = express.Router();
 const MICROSOFT_SCOPE = "offline_access https://outlook.office.com/IMAP.AccessAsUser.All";
@@ -17,6 +18,15 @@ router.use(requireAuth);
 function logJobs(event, data = {}) {
   // eslint-disable-next-line no-console
   console.log(`[jobs] ${event}`, data);
+}
+
+function formatJobRunRow(row) {
+  if (!row) return null;
+  const details = row.details || {};
+  return {
+    ...row,
+    errorDetail: details?.error || details?.stderrTail || details?.stdoutTail || null
+  };
 }
 
 function checkImapsyncAvailable() {
@@ -263,7 +273,7 @@ async function runImapsync({ account, sourceToken, sourcePassword, destinationPa
 
       proc.on("close", async (code) => {
         const status = code === 0 ? "success" : "failed";
-        const summary = code === 0 ? "imapsync completado" : `imapsync finalizo con error (${code})`;
+        const summary = code === 0 ? "imapsync completado" : imapsyncFailureSummary(code);
         logJobs("run-finished", {
           runId,
           status,
@@ -281,6 +291,7 @@ async function runImapsync({ account, sourceToken, sourcePassword, destinationPa
             summary,
             JSON.stringify({
               exitCode: code,
+              exitHintEs: code === 0 ? null : describeImapsyncExitCode(code),
               stdoutTail: stdoutBuffer,
               stderrTail: stderrBuffer
             })
@@ -416,7 +427,51 @@ router.post("/run", requireRole(["superadmin", "company_admin", "operator"]), as
   });
 });
 
+router.get(
+  "/runs/:runId",
+  requireRole(["superadmin", "company_admin", "operator", "scheduler", "viewer"]),
+  async (req, res) => {
+    const runId = safeTextOrNull(req.params.runId, 40);
+    if (!runId) {
+      return res.status(400).json({ error: "runId invalido" });
+    }
+    const result = await db.query(
+      `SELECT
+        jr.id,
+        jr.job_id AS "jobId",
+        jr.started_at AS "startedAt",
+        jr.finished_at AS "finishedAt",
+        jr.status::text AS status,
+        jr.summary,
+        jr.details,
+        j.job_name AS "jobName"
+       FROM job_runs jr
+       INNER JOIN jobs j ON j.id = jr.job_id
+       WHERE jr.company_id = $1 AND jr.id = $2::uuid
+       LIMIT 1`,
+      [req.user.companyId, runId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Ejecucion no encontrada" });
+    }
+    return res.json({ item: formatJobRunRow(result.rows[0]) });
+  }
+);
+
 router.get("/runs", requireRole(["superadmin", "company_admin", "operator", "scheduler", "viewer"]), async (req, res) => {
+  const pageSize = 4;
+  const countResult = await db.query(
+    `SELECT COUNT(*)::int AS n
+     FROM job_runs jr
+     WHERE jr.company_id = $1`,
+    [req.user.companyId]
+  );
+  const total = countResult.rows[0]?.n ?? 0;
+  const totalPages = total === 0 ? 1 : Math.ceil(total / pageSize);
+  const rawPage = parseInt(String(req.query.page || "1"), 10);
+  const page = Number.isFinite(rawPage) ? Math.min(Math.max(1, rawPage), totalPages) : 1;
+  const offset = (page - 1) * pageSize;
+
   const result = await db.query(
     `SELECT
       jr.id,
@@ -431,17 +486,11 @@ router.get("/runs", requireRole(["superadmin", "company_admin", "operator", "sch
      INNER JOIN jobs j ON j.id = jr.job_id
      WHERE jr.company_id = $1
      ORDER BY jr.created_at DESC
-     LIMIT 30`,
-    [req.user.companyId]
+     LIMIT $2 OFFSET $3`,
+    [req.user.companyId, pageSize, offset]
   );
-  const items = result.rows.map((row) => {
-    const details = row.details || {};
-    return {
-      ...row,
-      errorDetail: details?.error || details?.stderrTail || details?.stdoutTail || null
-    };
-  });
-  return res.json({ items });
+  const items = result.rows.map((row) => formatJobRunRow(row));
+  return res.json({ items, page, limit: pageSize, total, totalPages });
 });
 
 module.exports = router;

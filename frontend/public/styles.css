@@ -121,3 +121,23 @@ button.danger {
 .hint {
   color: #93c5fd;
 }
+
+.runs-pagination {
+  margin-top: 12px;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.run-detail-block {
+  margin-top: 8px;
+}
+
+.run-detail-pre {
+  margin: 8px 0 0;
+  max-height: min(50vh, 420px);
+  overflow: auto;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

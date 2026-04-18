@@ -118,6 +118,8 @@
     accounts: [],
     users: [],
     runs: [],
+    runsPage: 1,
+    runsMeta: { total: 0, totalPages: 1, limit: 4 },
     selectedUserCompanyId: null,
     selectedAccountIds: new Set(),
     queueRunning: false
@@ -146,6 +148,8 @@
     usersList: document.getElementById("usersList"),
     usersCount: document.getElementById("usersCount"),
     runsList: document.getElementById("runsList"),
+    runsPagination: document.getElementById("runsPagination"),
+    runsListHint: document.getElementById("runsListHint"),
     accountSelectAllBtn: document.getElementById("accountSelectAllBtn"),
     accountSelectNoneBtn: document.getElementById("accountSelectNoneBtn"),
     accountQueueDryBtn: document.getElementById("accountQueueDryBtn"),
@@ -429,13 +433,68 @@
     }
   }
 
+  function renderRunsPagination() {
+    if (!el.runsPagination) return;
+    el.runsPagination.replaceChildren();
+    const { total, totalPages, limit } = state.runsMeta;
+    const page = state.runsPage;
+    if (total === 0) {
+      el.runsPagination.classList.add("hidden");
+      return;
+    }
+    el.runsPagination.classList.remove("hidden");
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.className = "secondary";
+    prev.textContent = "Anterior";
+    prev.disabled = page <= 1;
+    prev.addEventListener("click", async () => {
+      if (state.runsPage <= 1) return;
+      state.runsPage -= 1;
+      try {
+        await loadRuns();
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+    const label = document.createElement("span");
+    label.className = "hint";
+    label.textContent = `Pagina ${page} de ${totalPages} (${total} total, ${limit} por pagina)`;
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "secondary";
+    next.textContent = "Siguiente";
+    next.disabled = page >= totalPages;
+    next.addEventListener("click", async () => {
+      if (state.runsPage >= totalPages) return;
+      state.runsPage += 1;
+      try {
+        await loadRuns();
+      } catch (err) {
+        setMessage(err.message, true);
+      }
+    });
+    el.runsPagination.appendChild(prev);
+    el.runsPagination.appendChild(label);
+    el.runsPagination.appendChild(next);
+  }
+
   function renderRuns() {
     el.runsList.replaceChildren();
+    if (el.runsListHint) {
+      el.runsListHint.classList.toggle("hidden", state.runsMeta.total === 0);
+      el.runsListHint.textContent =
+        state.runsMeta.total > 0
+          ? `Mostrando hasta ${state.runsMeta.limit} ejecuciones por pagina. Usa Ver más para el log completo de cada una.`
+          : "";
+    }
     if (!state.runs.length) {
       const p = document.createElement("p");
       p.className = "hint";
-      p.textContent = "Sin ejecuciones registradas.";
+      p.textContent =
+        state.runsMeta.total === 0 ? "Sin ejecuciones registradas." : "Sin resultados en esta pagina.";
       el.runsList.appendChild(p);
+      renderRunsPagination();
       return;
     }
     for (const run of state.runs) {
@@ -447,11 +506,35 @@
       card.appendChild(createTextLine("Inicio", run.startedAt));
       card.appendChild(createTextLine("Fin", run.finishedAt));
       card.appendChild(createTextLine("Resumen", run.summary));
-      if (run.errorDetail) {
-        card.appendChild(createTextLine("Detalle", String(run.errorDetail).slice(0, 1200)));
+      const detailText = run.errorDetail != null && run.errorDetail !== "" ? String(run.errorDetail) : "";
+      if (detailText) {
+        const wrap = document.createElement("div");
+        wrap.className = "run-detail-block";
+        const detLabel = document.createElement("p");
+        detLabel.className = "hint";
+        detLabel.style.margin = "0";
+        detLabel.textContent = "Detalle";
+        const pre = document.createElement("pre");
+        pre.className = "pre run-detail-pre";
+        pre.textContent = detailText;
+        pre.hidden = true;
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "secondary run-detail-toggle";
+        toggle.textContent = "Ver más";
+        toggle.addEventListener("click", () => {
+          const open = pre.hidden;
+          pre.hidden = !open;
+          toggle.textContent = open ? "Ver menos" : "Ver más";
+        });
+        wrap.appendChild(detLabel);
+        wrap.appendChild(toggle);
+        wrap.appendChild(pre);
+        card.appendChild(wrap);
       }
       el.runsList.appendChild(card);
     }
+    renderRunsPagination();
   }
 
   function renderUsers() {
@@ -525,8 +608,14 @@
   }
 
   async function loadRuns() {
-    const result = await api("/jobs/runs");
+    const result = await api(`/jobs/runs?page=${encodeURIComponent(String(state.runsPage))}&limit=4`);
     state.runs = Array.isArray(result?.items) ? result.items : [];
+    const total = Number(result?.total) || 0;
+    const limit = Number(result?.limit) || 4;
+    const totalPages = Math.max(1, Number(result?.totalPages) || 1);
+    const page = Number(result?.page) || state.runsPage;
+    state.runsPage = page;
+    state.runsMeta = { total, totalPages, limit };
     renderRuns();
   }
 
@@ -598,16 +687,22 @@
     const deadline = Date.now() + maxWaitMs;
     let seen = false;
     while (Date.now() < deadline) {
-      await loadRuns();
-      const row = state.runs.find((r) => r.id === runId);
-      if (row) {
-        seen = true;
-        if (row.status !== "running") {
-          return row;
+      try {
+        const data = await api(`/jobs/runs/${encodeURIComponent(runId)}`);
+        const row = data?.item;
+        if (row) {
+          seen = true;
+          if (row.status !== "running") {
+            await loadRuns().catch(() => {});
+            return row;
+          }
         }
+      } catch (_err) {
+        // Transitorio (404 justo al crear, red, etc.): reintentar.
       }
       await new Promise((resolve) => setTimeout(resolve, 3000));
     }
+    await loadRuns().catch(() => {});
     throw new Error(
       seen
         ? "Tiempo maximo esperando el fin de la ejecucion. Revisa Ejecuciones recientes."
@@ -1083,6 +1178,16 @@
     el.accountsList.replaceChildren();
     if (el.usersList) el.usersList.replaceChildren();
     if (el.runsList) el.runsList.replaceChildren();
+    state.runsPage = 1;
+    state.runsMeta = { total: 0, totalPages: 1, limit: 4 };
+    if (el.runsPagination) {
+      el.runsPagination.replaceChildren();
+      el.runsPagination.classList.add("hidden");
+    }
+    if (el.runsListHint) {
+      el.runsListHint.textContent = "";
+      el.runsListHint.classList.add("hidden");
+    }
     if (el.oauthSection) el.oauthSection.classList.add("hidden");
     if (el.companiesSection) el.companiesSection.classList.add("hidden");
     if (el.userCompanySelectorWrap) el.userCompanySelectorWrap.classList.add("hidden");
