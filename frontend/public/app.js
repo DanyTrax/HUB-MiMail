@@ -124,7 +124,8 @@
     runsDetailExpandedIds: new Set(),
     selectedUserCompanyId: null,
     selectedAccountIds: new Set(),
-    queueRunning: false
+    queueRunning: false,
+    queueCancelRequested: false
   };
 
   const el = {
@@ -156,6 +157,8 @@
     accountSelectNoneBtn: document.getElementById("accountSelectNoneBtn"),
     accountQueueDryBtn: document.getElementById("accountQueueDryBtn"),
     accountQueueMigrateBtn: document.getElementById("accountQueueMigrateBtn"),
+    accountQueueStopBtn: document.getElementById("accountQueueStopBtn"),
+    accountQueueContinueOnFail: document.getElementById("accountQueueContinueOnFail"),
     companiesSection: document.getElementById("companiesSection"),
     companiesList: document.getElementById("companiesList"),
     companiesCount: document.getElementById("companiesCount"),
@@ -272,6 +275,44 @@
       lab.appendChild(document.createTextNode(" Incluir en cola secuencial"));
       selWrap.appendChild(lab);
       card.appendChild(selWrap);
+
+      if (!item.metadata || typeof item.metadata !== "object" || Array.isArray(item.metadata)) {
+        item.metadata = {};
+      }
+      const largeWrap = document.createElement("div");
+      largeWrap.className = "row";
+      const largeCb = document.createElement("input");
+      largeCb.type = "checkbox";
+      largeCb.id = `large-acc-${item.id}`;
+      largeCb.checked = Boolean(item.metadata.largeMailboxForQueue);
+      largeCb.disabled = state.queueRunning;
+      largeCb.addEventListener("change", async () => {
+        try {
+          const updated = await api(`/mail-accounts/${item.id}`, {
+            method: "PATCH",
+            body: { metadata: { largeMailboxForQueue: largeCb.checked } }
+          });
+          if (updated.metadata && typeof updated.metadata === "object") {
+            item.metadata = updated.metadata;
+          } else {
+            item.metadata = { ...item.metadata, largeMailboxForQueue: largeCb.checked };
+          }
+          setMessage(
+            largeCb.checked
+              ? "Buzon grande: en cola, hasta 3 intentos y 48 h de espera por migracion."
+              : "Buzon normal en cola (un intento, 8 h max. de espera)."
+          );
+        } catch (err) {
+          largeCb.checked = !largeCb.checked;
+          setMessage(err.message, true);
+        }
+      });
+      const largeLab = document.createElement("label");
+      largeLab.htmlFor = largeCb.id;
+      largeLab.appendChild(largeCb);
+      largeLab.appendChild(document.createTextNode(" Buzon grande (~10+ GB, reintentos en cola)"));
+      largeWrap.appendChild(largeLab);
+      card.appendChild(largeWrap);
 
       const title = document.createElement("h3");
       title.textContent = `${item.provider} - ${item.sourceEmail}`;
@@ -707,13 +748,29 @@
     [el.accountSelectAllBtn, el.accountSelectNoneBtn, el.accountQueueDryBtn, el.accountQueueMigrateBtn].forEach((btn) => {
       if (btn) btn.disabled = disabled;
     });
+    if (el.accountQueueStopBtn) el.accountQueueStopBtn.disabled = !disabled;
+    if (el.accountQueueContinueOnFail) el.accountQueueContinueOnFail.disabled = disabled;
   }
 
-  async function waitForRunComplete(runId, dryRun) {
-    const maxWaitMs = dryRun ? 25 * 60 * 1000 : 8 * 60 * 60 * 1000;
+  function accountIsLargeMailboxQueue(a) {
+    return Boolean(a?.metadata && typeof a.metadata === "object" && a.metadata.largeMailboxForQueue);
+  }
+
+  async function waitForRunComplete(runId, dryRun, opts = {}) {
+    const maxWaitMs =
+      typeof opts.maxWaitMs === "number" && opts.maxWaitMs > 0
+        ? opts.maxWaitMs
+        : dryRun
+          ? 25 * 60 * 1000
+          : 8 * 60 * 60 * 1000;
+    const shouldCancel = typeof opts.shouldCancel === "function" ? opts.shouldCancel : null;
     const deadline = Date.now() + maxWaitMs;
     let seen = false;
     while (Date.now() < deadline) {
+      if (shouldCancel && shouldCancel()) {
+        await loadRuns().catch(() => {});
+        throw new Error("Cola detenida por el usuario.");
+      }
       try {
         const data = await api(`/jobs/runs/${encodeURIComponent(runId)}`);
         const row = data?.item;
@@ -737,6 +794,65 @@
     );
   }
 
+  const QUEUE_LARGE_MAX_ATTEMPTS = 3;
+  const QUEUE_LARGE_MAX_WAIT_MS = 48 * 60 * 60 * 1000;
+  const QUEUE_RETRY_PAUSE_MS = 15 * 1000;
+
+  async function runAccountThroughQueueAttempts(a, dryRun) {
+    const large = accountIsLargeMailboxQueue(a);
+    const maxAttempts = large ? QUEUE_LARGE_MAX_ATTEMPTS : 1;
+    const maxWaitMs =
+      large && !dryRun
+        ? QUEUE_LARGE_MAX_WAIT_MS
+        : dryRun
+          ? 25 * 60 * 1000
+          : 8 * 60 * 60 * 1000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (state.queueCancelRequested) {
+        return { cancelled: true };
+      }
+      if (attempt > 1) {
+        setMessage(`Reintento ${attempt}/${maxAttempts} (${a.sourceEmail}, buzon grande)…`);
+        await new Promise((r) => setTimeout(r, QUEUE_RETRY_PAUSE_MS));
+      }
+      if (state.queueCancelRequested) {
+        return { cancelled: true };
+      }
+      const launched = await runMigration(a, dryRun);
+      if (!launched) {
+        return { ok: false, reason: "launch", email: a.sourceEmail };
+      }
+      try {
+        const finished = await waitForRunComplete(launched.runId, dryRun, {
+          maxWaitMs,
+          shouldCancel: () => state.queueCancelRequested
+        });
+        if (state.queueCancelRequested) {
+          return { cancelled: true };
+        }
+        if (finished.status === "success") {
+          return { ok: true };
+        }
+        if (large && attempt < maxAttempts) {
+          setMessage(`Error en intento ${attempt}/${maxAttempts} (${a.sourceEmail}), reintentando…`, true);
+          continue;
+        }
+        return { ok: false, reason: "failed", email: a.sourceEmail };
+      } catch (err) {
+        if (state.queueCancelRequested) {
+          return { cancelled: true };
+        }
+        if (large && attempt < maxAttempts) {
+          setMessage(`${err.message || "Error"} — reintentando ${a.sourceEmail}…`, true);
+          continue;
+        }
+        return { ok: false, reason: "error", email: a.sourceEmail, err };
+      }
+    }
+    return { ok: false, reason: "exhausted", email: a.sourceEmail };
+  }
+
   async function runMigrationQueue(dryRun) {
     const ids = Array.from(state.selectedAccountIds);
     if (!ids.length) {
@@ -746,36 +862,91 @@
     const accounts = ids
       .map((id) => state.accounts.find((a) => a.id === id))
       .filter(Boolean);
+    const continueOnFail = Boolean(el.accountQueueContinueOnFail?.checked);
+    if (ids.length > accounts.length) {
+      setMessage(
+        `Atencion: ${ids.length} casilla(s) marcada(s) pero solo ${accounts.length} cuenta(s) coinciden con la lista cargada. Pulsa Actualizar en Cuentas y revisa la seleccion.`,
+        true
+      );
+    }
+    if (!accounts.length) {
+      setMessage("No hay cuentas validas en cola. Pulsa Actualizar en Cuentas.", true);
+      return;
+    }
+    const preview = accounts
+      .slice(0, 6)
+      .map((a) => a.sourceEmail)
+      .join(", ");
+    const previewMore = accounts.length > 6 ? ` (+${accounts.length - 6} mas)` : "";
+    setMessage(
+      `Cola: ${accounts.length} cuenta(s). Orden: ${preview}${previewMore}.${continueOnFail ? " Modo: seguir si falla." : ""}`
+    );
     for (const a of accounts) {
       if (a.provider === "microsoft" && !a.hasMicrosoftOauth) {
         setMessage(`La cuenta ${a.sourceEmail} no tiene OAuth Microsoft. Conectala antes de usar la cola.`, true);
         return;
       }
     }
+    state.queueCancelRequested = false;
     state.queueRunning = true;
     setQueueControlsDisabled(true);
     renderAccounts();
+    const failedEmails = [];
     try {
       for (let i = 0; i < accounts.length; i += 1) {
-        const a = accounts[i];
-        setMessage(`Cola ${i + 1}/${accounts.length}: ${a.sourceEmail} (${dryRun ? "probar login" : "migrar"})…`);
-        const launched = await runMigration(a, dryRun);
-        if (!launched) {
-          setMessage(`Cola detenida: no se pudo iniciar ${a.sourceEmail}.`, true);
+        if (state.queueCancelRequested) {
+          setMessage("Cola detenida por el usuario.", true);
           return;
         }
-        const finished = await waitForRunComplete(launched.runId, dryRun);
-        if (finished.status === "failed") {
-          setMessage(`Fallo en ${a.sourceEmail}. Cola detenida. Revisa el detalle en Ejecuciones recientes.`, true);
+        const a = accounts[i];
+        const large = accountIsLargeMailboxQueue(a);
+        setMessage(
+          `Cola ${i + 1}/${accounts.length}: ${a.sourceEmail} (${dryRun ? "probar login" : "migrar"})${large ? " — buzon grande" : ""}…`
+        );
+        const result = await runAccountThroughQueueAttempts(a, dryRun);
+        if (result.cancelled) {
+          setMessage("Cola detenida por el usuario.", true);
+          return;
+        }
+        if (!result.ok) {
+          failedEmails.push(result.email || a.sourceEmail);
+          if (continueOnFail && i < accounts.length - 1) {
+            setMessage(
+              `Fallo en ${result.email || a.sourceEmail}; se continua con la siguiente cuenta. Revisa Ejecuciones recientes.`,
+              true
+            );
+            continue;
+          }
+          if (continueOnFail && i === accounts.length - 1) {
+            await loadRuns().catch(() => {});
+            setMessage(
+              `Cola finalizada. Ultima cuenta con fallo. Emails con error: ${failedEmails.join(", ")}. Revisa Ejecuciones recientes.`,
+              true
+            );
+            return;
+          }
+          setMessage(
+            `Fallo en ${result.email || a.sourceEmail}. Cola detenida (primera cuenta con error). Revisa Ejecuciones recientes. Si marcaste solo una cuenta, solo se procesa esa.`,
+            true
+          );
+          await loadRuns().catch(() => {});
           return;
         }
       }
-      setMessage(`Cola terminada: ${accounts.length} cuenta(s).`);
       await loadRuns();
+      if (failedEmails.length) {
+        setMessage(
+          `Cola terminada. Fallo(s) previo(s) en: ${failedEmails.join(", ")}. El resto OK. Revisa Ejecuciones recientes.`,
+          true
+        );
+      } else {
+        setMessage(`Cola terminada: ${accounts.length} cuenta(s).`);
+      }
     } catch (err) {
       setMessage(err.message || "Error en la cola de migracion.", true);
     } finally {
       state.queueRunning = false;
+      state.queueCancelRequested = false;
       setQueueControlsDisabled(false);
       renderAccounts();
     }
@@ -992,6 +1163,14 @@
   if (el.accountQueueMigrateBtn) {
     el.accountQueueMigrateBtn.addEventListener("click", () => {
       void runMigrationQueue(false);
+    });
+  }
+
+  if (el.accountQueueStopBtn) {
+    el.accountQueueStopBtn.addEventListener("click", () => {
+      if (!state.queueRunning) return;
+      state.queueCancelRequested = true;
+      setMessage("Parando cola: no se iniciaran mas cuentas (el job actual sigue en el servidor hasta terminar).");
     });
   }
 

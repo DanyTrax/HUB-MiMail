@@ -120,14 +120,18 @@ router.patch(
     const hasSourceHost = Object.prototype.hasOwnProperty.call(req.body || {}, "sourceHost");
     const hasDestinationHost = Object.prototype.hasOwnProperty.call(req.body || {}, "destinationHost");
     const hasIsActive = Object.prototype.hasOwnProperty.call(req.body || {}, "isActive");
+    const hasMetadata = Object.prototype.hasOwnProperty.call(req.body || {}, "metadata");
 
     const destinationEmail = hasDestinationEmail ? normalizeEmailOrNull(req.body?.destinationEmail) : undefined;
     const sourceHost = hasSourceHost ? normalizeHostOrNull(req.body?.sourceHost) : undefined;
     const destinationHost = hasDestinationHost ? normalizeHostOrNull(req.body?.destinationHost) : undefined;
     const isActive = typeof req.body?.isActive === "boolean" ? req.body.isActive : null;
 
-    if (!hasDestinationEmail && !hasSourceHost && !hasDestinationHost && !hasIsActive) {
+    if (!hasDestinationEmail && !hasSourceHost && !hasDestinationHost && !hasIsActive && !hasMetadata) {
       return res.status(400).json({ error: "No hay campos validos para actualizar" });
+    }
+    if (hasMetadata && (typeof req.body.metadata !== "object" || req.body.metadata === null)) {
+      return res.status(400).json({ error: "metadata debe ser un objeto JSON" });
     }
     if (hasDestinationEmail && destinationEmail === null) {
       return res.status(400).json({ error: "destinationEmail invalido" });
@@ -149,6 +153,10 @@ router.patch(
         source_host = COALESCE($4, source_host),
         destination_host = COALESCE($5, destination_host),
         is_active = COALESCE($6, is_active),
+        metadata = CASE
+          WHEN $7 = TRUE THEN mail_accounts.metadata || $8::jsonb
+          ELSE mail_accounts.metadata
+        END,
         updated_at = NOW()
       WHERE id = $1
         AND company_id = $2
@@ -187,7 +195,9 @@ router.patch(
       destinationEmail ?? null,
       sourceHost ?? null,
       destinationHost ?? null,
-      hasIsActive ? isActive : null
+      hasIsActive ? isActive : null,
+      hasMetadata,
+      hasMetadata ? JSON.stringify(req.body.metadata) : "{}"
     ]);
 
     if (!rows.length) return res.status(404).json({ error: "Cuenta no encontrada" });
