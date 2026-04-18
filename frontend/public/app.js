@@ -351,7 +351,15 @@
       }
       testBtn.addEventListener("click", async () => {
         try {
-          await runMigration(item, true);
+          const launched = await runMigration(item, true);
+          if (launched?.runId) {
+            const finished = await waitForRunComplete(launched.runId, true);
+            if (finished.status === "success") {
+              setMessage(`Probar login listo: ${item.sourceEmail}.`);
+            } else {
+              setMessage(`Probar login termino con error: ${item.sourceEmail}. Revisa Ejecuciones recientes.`, true);
+            }
+          }
         } catch (err) {
           setMessage(err.message || "No se pudo lanzar la prueba de login.", true);
         }
@@ -366,7 +374,15 @@
       }
       migrateBtn.addEventListener("click", async () => {
         try {
-          await runMigration(item, false);
+          const launched = await runMigration(item, false);
+          if (launched?.runId) {
+            const finished = await waitForRunComplete(launched.runId, false);
+            if (finished.status === "success") {
+              setMessage(`Migracion completada: ${item.sourceEmail}.`);
+            } else {
+              setMessage(`Migracion termino con error: ${item.sourceEmail}. Revisa Ejecuciones recientes.`, true);
+            }
+          }
         } catch (err) {
           setMessage(err.message || "No se pudo lanzar la migracion.", true);
         }
