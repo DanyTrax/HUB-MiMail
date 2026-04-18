@@ -1207,12 +1207,4 @@
   });
 
   bootstrapSession();
-  setInterval(async () => {
-    if (!state.token || el.appSection.classList.contains("hidden")) return;
-    try {
-      await loadRuns();
-    } catch (_err) {
-      // Silencioso para no interrumpir la operacion del usuario.
-    }
-  }, 6000);
 })();
