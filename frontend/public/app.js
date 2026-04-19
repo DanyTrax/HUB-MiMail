@@ -753,7 +753,30 @@
   }
 
   function accountIsLargeMailboxQueue(a) {
-    return Boolean(a?.metadata && typeof a.metadata === "object" && a.metadata.largeMailboxForQueue);
+    let meta = a?.metadata;
+    if (typeof meta === "string") {
+      try {
+        meta = JSON.parse(meta);
+      } catch (_e) {
+        return false;
+      }
+    }
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
+    const v = meta.largeMailboxForQueue;
+    return v === true || v === "true" || v === 1;
+  }
+
+  /** Cuenta actual desde state.accounts (metadata fresco tras PATCH / Actualizar). */
+  function resolveAccountFresh(accountOrId) {
+    const id = typeof accountOrId === "string" ? accountOrId : accountOrId?.id;
+    if (!id) return typeof accountOrId === "object" ? accountOrId : null;
+    return state.accounts.find((x) => x.id === id) || (typeof accountOrId === "object" ? accountOrId : null);
+  }
+
+  function jobRunIsSuccess(row) {
+    return String(row?.status || "")
+      .toLowerCase()
+      .trim() === "success";
   }
 
   async function waitForRunComplete(runId, dryRun, opts = {}) {
@@ -798,9 +821,11 @@
   const QUEUE_LARGE_MAX_WAIT_MS = 48 * 60 * 60 * 1000;
   const QUEUE_RETRY_PAUSE_MS = 15 * 1000;
 
-  async function runAccountThroughQueueAttempts(a, dryRun) {
-    const large = accountIsLargeMailboxQueue(a);
+  async function runAccountThroughQueueAttempts(accountRef, dryRun) {
+    const acc0 = resolveAccountFresh(accountRef) || accountRef;
+    const large = accountIsLargeMailboxQueue(acc0);
     const maxAttempts = large ? QUEUE_LARGE_MAX_ATTEMPTS : 1;
+    const emailLabel = acc0?.sourceEmail || accountRef?.sourceEmail || accountRef?.id || "cuenta";
     const maxWaitMs =
       large && !dryRun
         ? QUEUE_LARGE_MAX_WAIT_MS
@@ -812,16 +837,23 @@
       if (state.queueCancelRequested) {
         return { cancelled: true };
       }
-      if (attempt > 1) {
-        setMessage(`Reintento ${attempt}/${maxAttempts} (${a.sourceEmail}, buzon grande)…`);
+      if (attempt > 1 && large) {
+        setMessage(`Reintento ${attempt}/${maxAttempts} (${emailLabel}, buzon grande)…`);
         await new Promise((r) => setTimeout(r, QUEUE_RETRY_PAUSE_MS));
       }
       if (state.queueCancelRequested) {
         return { cancelled: true };
       }
-      const launched = await runMigration(a, dryRun);
+
+      const acc = resolveAccountFresh(accountRef) || acc0;
+      const launched = await runMigration(acc, dryRun);
       if (!launched) {
-        return { ok: false, reason: "launch", email: a.sourceEmail };
+        if (large && attempt < maxAttempts) {
+          setMessage(`No se pudo iniciar el job (intento ${attempt}/${maxAttempts}). Reintentando…`, true);
+          await new Promise((r) => setTimeout(r, QUEUE_RETRY_PAUSE_MS));
+          continue;
+        }
+        return { ok: false, reason: "launch", email: emailLabel };
       }
       try {
         const finished = await waitForRunComplete(launched.runId, dryRun, {
@@ -831,32 +863,38 @@
         if (state.queueCancelRequested) {
           return { cancelled: true };
         }
-        if (finished.status === "success") {
+        if (jobRunIsSuccess(finished)) {
           return { ok: true };
         }
         if (large && attempt < maxAttempts) {
-          setMessage(`Error en intento ${attempt}/${maxAttempts} (${a.sourceEmail}), reintentando…`, true);
+          setMessage(`Error en intento ${attempt}/${maxAttempts} (${emailLabel}), reintentando…`, true);
           continue;
         }
-        return { ok: false, reason: "failed", email: a.sourceEmail };
+        return { ok: false, reason: "failed", email: emailLabel };
       } catch (err) {
         if (state.queueCancelRequested) {
           return { cancelled: true };
         }
         if (large && attempt < maxAttempts) {
-          setMessage(`${err.message || "Error"} — reintentando ${a.sourceEmail}…`, true);
+          setMessage(`${err.message || "Error"} — reintentando ${emailLabel}…`, true);
           continue;
         }
-        return { ok: false, reason: "error", email: a.sourceEmail, err };
+        return { ok: false, reason: "error", email: emailLabel, err };
       }
     }
-    return { ok: false, reason: "exhausted", email: a.sourceEmail };
+    return { ok: false, reason: "exhausted", email: emailLabel };
   }
 
   async function runMigrationQueue(dryRun) {
     const ids = Array.from(state.selectedAccountIds);
     if (!ids.length) {
       setMessage("Selecciona al menos una cuenta (casilla En cola).", true);
+      return;
+    }
+    try {
+      await loadAccounts();
+    } catch (_e) {
+      setMessage("No se pudo refrescar la lista de cuentas. Pulsa Actualizar e intenta de nuevo.", true);
       return;
     }
     const accounts = ids
@@ -878,8 +916,15 @@
       .map((a) => a.sourceEmail)
       .join(", ");
     const previewMore = accounts.length > 6 ? ` (+${accounts.length - 6} mas)` : "";
+    const largePreview = accounts
+      .filter((x) => accountIsLargeMailboxQueue(x))
+      .map((x) => x.sourceEmail);
+    const largeHint =
+      largePreview.length > 0
+        ? ` Buzon grande (hasta 3 intentos): ${largePreview.slice(0, 5).join(", ")}${largePreview.length > 5 ? "…" : ""}.`
+        : " Ninguna cuenta detectada como buzon grande (marca la casilla en la tarjeta y guarda).";
     setMessage(
-      `Cola: ${accounts.length} cuenta(s). Orden: ${preview}${previewMore}.${continueOnFail ? " Modo: seguir si falla." : ""}`
+      `Cola: ${accounts.length} cuenta(s). Orden: ${preview}${previewMore}.${continueOnFail ? " Modo: seguir si falla." : ""}${largeHint}`
     );
     for (const a of accounts) {
       if (a.provider === "microsoft" && !a.hasMicrosoftOauth) {
@@ -898,10 +943,10 @@
           setMessage("Cola detenida por el usuario.", true);
           return;
         }
-        const a = accounts[i];
+        const a = resolveAccountFresh(accounts[i]) || accounts[i];
         const large = accountIsLargeMailboxQueue(a);
         setMessage(
-          `Cola ${i + 1}/${accounts.length}: ${a.sourceEmail} (${dryRun ? "probar login" : "migrar"})${large ? " — buzon grande" : ""}…`
+          `Cola ${i + 1}/${accounts.length}: ${a.sourceEmail} (${dryRun ? "probar login" : "migrar"})${large ? " — buzon grande (reintentos activos)" : ""}…`
         );
         const result = await runAccountThroughQueueAttempts(a, dryRun);
         if (result.cancelled) {
