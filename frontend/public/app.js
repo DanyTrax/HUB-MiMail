@@ -250,6 +250,22 @@
     return p;
   }
 
+  function formatBogotaDateTime(value) {
+    if (!value) return "-";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return new Intl.DateTimeFormat("es-CO", {
+      timeZone: "America/Bogota",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    }).format(d);
+  }
+
   function renderAccounts() {
     el.accountsList.replaceChildren();
     el.accountsCount.textContent = `Total cuentas: ${state.accounts.length} · Seleccionadas para cola: ${state.selectedAccountIds.size}`;
@@ -562,8 +578,8 @@
       const title = document.createElement("h3");
       title.textContent = `${run.jobName || "Job"} - ${run.status}`;
       card.appendChild(title);
-      card.appendChild(createTextLine("Inicio", run.startedAt));
-      card.appendChild(createTextLine("Fin", run.finishedAt));
+      card.appendChild(createTextLine("Inicio", formatBogotaDateTime(run.startedAt)));
+      card.appendChild(createTextLine("Fin", formatBogotaDateTime(run.finishedAt)));
       card.appendChild(createTextLine("Resumen", run.summary));
       const detailText = run.errorDetail != null && run.errorDetail !== "" ? String(run.errorDetail) : "";
       if (detailText) {
